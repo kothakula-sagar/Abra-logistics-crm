@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://abrazylo.github.io/abra-zylo-seo-generator-main/sitemap.xml

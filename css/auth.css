@@ -1,0 +1,30 @@
+/* ═══════════════════════════════
+   AUTH PAGES
+   ═══════════════════════════════ */
+
+.page-auth{min-height:100vh;display:flex;align-items:stretch;justify-content:center}
+.auth-view{display:none;min-height:100vh}
+.auth-view.active{display:block}
+
+.auth-shell{min-height:100vh;display:grid;grid-template-columns:420px 1fr}
+.auth-left{background:linear-gradient(135deg,rgba(255,255,255,.86),rgba(248,244,235,.85));padding:3rem;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;border-right:1px solid rgba(17,17,17,.06)}
+.auth-left::before{content:'';position:absolute;top:-120px;right:-120px;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(244,180,0,.2),transparent 70%)}
+.auth-left::after{content:'';position:absolute;bottom:-90px;left:-80px;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,rgba(255,213,79,.16),transparent 68%)}
+
+.auth-logo{width:min(210px,100%);margin-bottom:3rem;position:relative;z-index:1}
+.auth-logo img{display:block;width:100%;height:auto;object-fit:contain;}
+
+.auth-left h1{color:#111;font-size:1.9rem;font-weight:800;line-height:1.25;margin-bottom:1rem;position:relative;z-index:1}
+.auth-left h1 em{font-style:normal;color:#b77900}
+.auth-left p{color:rgba(17,17,17,.7);font-size:.88rem;line-height:1.75;position:relative;z-index:1}
+
+.auth-feats{margin-top:2.5rem;display:flex;flex-direction:column;gap:10px;position:relative;z-index:1}
+.auth-feat{display:flex;align-items:center;gap:10px;color:rgba(17,17,17,.72);font-size:.84rem}
+.feat-dot{width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));flex-shrink:0;box-shadow:0 0 0 6px rgba(244,180,0,.12)}
+
+.auth-right{background:linear-gradient(135deg,rgba(250,247,241,.92),rgba(242,237,226,.9));display:flex;align-items:center;justify-content:center;padding:2.5rem}
+.auth-box{width:100%;max-width:380px;padding:2rem;border:1px solid rgba(17,17,17,.08);border-radius:28px;background:rgba(255,255,255,.62);box-shadow:0 24px 64px rgba(17,24,39,.08);backdrop-filter:blur(24px)}
+.auth-box h2{font-size:1.6rem;font-weight:800;margin-bottom:.35rem;color:#111}
+.auth-box .sub{color:var(--text2);font-size:.9rem;margin-bottom:1.75rem}
+.auth-help-row{margin:.75rem 0 1rem;text-align:right}
+.auth-switch{margin-top:1.1rem;text-align:center;font-size:.85rem;color:var(--text2)}

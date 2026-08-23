@@ -1,0 +1,109 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedTo",       "order": "ASCENDING"  },
+        { "fieldPath": "slNo",             "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedTo",       "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",           "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedTo",       "order": "ASCENDING"  },
+        { "fieldPath": "status",           "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "campaignName",     "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedTo",       "order": "ASCENDING"  },
+        { "fieldPath": "campaignName",     "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignmentPending","order": "ASCENDING"  },
+        { "fieldPath": "createdAt",        "order": "ASCENDING"  }
+      ]
+    },
+    {
+      "collectionGroup": "leaves",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date",   "order": "DESCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING"  }
+      ]
+    },
+    {
+      "collectionGroup": "leaves",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "memberId", "order": "ASCENDING"  },
+        { "fieldPath": "date",     "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leaves",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date",     "order": "ASCENDING"  },
+        { "fieldPath": "status",   "order": "ASCENDING"  }
+      ]
+    },
+    {
+      "collectionGroup": "auditLog",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "assignmentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "campaignFields",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "campaignId",   "order": "ASCENDING" },
+        { "fieldPath": "displayOrder", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

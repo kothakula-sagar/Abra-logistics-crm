@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Abra Logistics </title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Campaign Analytics (Module 2) + Campaign Reports (Module 3) libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="auth-brand-mark">AL</div>
+        <div>
+          <div class="sidebar-brand-title">Abra Logistics</div>
+          <div class="sidebar-brand-sub">Sales CRM</div>
+        </div>
+      </div>
+
+      <nav id="sideNav" class="sidebar-nav"></nav>
+
+      <div class="sidebar-user">
+        <div class="sidebar-user-name" id="userName">—</div>
+        <div class="sidebar-user-role" id="userRole">—</div>
+        <button id="logoutBtn" class="btn btn-sm btn-outline-light w-100 mt-2">
+          <i class="bi bi-box-arrow-right"></i> Go out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+
+      <!-- LEADS VIEW -->
+      <section id="view-leads" class="view-section">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h1 class="page-title">Leads</h1>
+            <p class="page-subtitle">Enterprise CRM — manage leads, track status, and schedule follow-ups.</p>
+          </div>
+          <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-sm btn-outline-secondary" onclick="openTablePreferences()" title="Table Settings">
+              <i class="bi bi-sliders"></i>
+            </button>
+            <div id="addLeadBtnWrap"></div>
+          </div>
+        </div>
+
+        <div id="leadFilters"></div>
+
+        <div id="manualAssignmentToolbar" class="d-none mb-3">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 p-2 rounded bg-light border">
+            <div class="d-flex align-items-center gap-2">
+              <input type="checkbox" id="selectAllPendingLeads" class="form-check-input" title="Select all pending leads">
+              <span class="small text-muted">Selected: <strong id="manualSelectionCounter">0</strong></span>
+            </div>
+            <button id="assignSelectedBtn" class="btn btn-sm btn-brand" onclick="openBulkManualAssignmentModal()">
+              <i class="bi bi-person-check-fill me-1"></i>Assign Selected
+            </button>
+          </div>
+        </div>
+
+        <div class="leads-table-container">
+          <div class="table-responsive">
+            <table class="table leads-table align-middle mb-0">
+              <thead>
+                <tr>
+                  <th style="width: 40px;" class="text-center"><input type="checkbox" id="selectAllLeadsCheckbox" class="form-check-input" title="Select all visible pending leads"></th>
+                  <th style="width: 70px;">Sl.No</th>
+                  <th style="width: 140px;">Date &amp; Time</th>
+                  <th style="width: 180px;">Customer Name</th>
+                  <th style="width: 130px;">Phone</th>
+                  <th style="width: 170px;" class="col-campaign">Campaign</th>
+                  <th style="width: 160px;" class="col-assigned">Assigned To</th>
+                  <th style="width: 150px;">Status</th>
+                  <th style="width: 250px;" class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="leadsTableBody">
+                <tr><td colspan="8" class="text-center py-4 text-muted">
+                  <div class="spinner-border spinner-border-sm me-2"></div>Loading leads...
+                </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- MY FOLLOW-UPS VIEW (Member) -->
+      <section id="view-myfollowups" class="view-section d-none">
+        <h1 class="page-title">My Follow-ups</h1>
+        <p class="page-subtitle">Soonest callbacks first — Busy (1 hr) and Not Picking Call (4 hr) reminders land here automatically.</p>
+        <div id="myFollowUpsBody"></div>
+      </section>
+
+      <!-- TELEGRAM NOTIFICATIONS VIEW (All roles) -->
+      <section id="view-telegram" class="view-section d-none">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h1 class="page-title"><i class="bi bi-telegram me-2"></i>Telegram Notifications</h1>
+            <p class="page-subtitle">Connect your Telegram account to receive lead assignments and overdue reminders.</p>
+          </div>
+        </div>
+        <div id="telegramSettingsBody"></div>
+      </section>
+      <!-- URGENT ACTIONS VIEW (All roles — content is role-branched in leads.js) -->
+      <section id="view-urgent" class="view-section d-none">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h1 class="page-title" id="urgentViewTitle">Urgent Actions</h1>
+            <p class="page-subtitle" id="urgentViewSubtitle">Leads that need immediate attention.</p>
+          </div>
+        </div>
+        <div id="urgentActionsBody"></div>
+      </section>
+
+      <!-- DAILY REPORT VIEW (Admin / Super Admin) -->
+      <section id="view-report" class="view-section d-none">
+        <h1 class="page-title">Reports</h1>
+        <p class="page-subtitle">Daily team summaries and campaign-level performance reporting.</p>
+
+        <ul class="nav nav-tabs mb-3 report-tabs" id="reportTabs">
+          <li class="nav-item">
+            <button class="nav-link active" id="reportTabDaily" onclick="switchReportTab('daily')">
+              <i class="bi bi-file-earmark-text me-1"></i>Daily Report
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" id="reportTabCampaign" onclick="switchReportTab('campaign')">
+              <i class="bi bi-columns-gap me-1"></i>Campaign Reports
+            </button>
+          </li>
+        </ul>
+
+        <div id="dailyReportPanel">
+        <div class="row g-2 align-items-end mb-3 report-period-controls">
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">Period</label>
+            <select id="reportPeriod" class="form-select form-select-sm">
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="custom_date">Custom Date</option>
+              <option value="date_range">Date Range</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">Date</label>
+            <input type="date" id="reportDate" class="form-control form-control-sm">
+          </div>
+          <div id="reportDateRangeWrap" class="d-none col-12 col-md-6">
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label small mb-1">From Date</label>
+                <input type="date" id="reportDateRangeFrom" class="form-control form-control-sm">
+              </div>
+              <div class="col-6">
+                <label class="form-label small mb-1">To Date</label>
+                <input type="date" id="reportDateRangeTo" class="form-control form-control-sm">
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">Manager name</label>
+            <input type="text" id="reportManagerName" class="form-control form-control-sm" placeholder="e.g. Sri" value="Sri">
+          </div>
+          <div class="col-6 col-md-3">
+            <button class="btn btn-sm btn-brand" onclick="renderDailyReport()">
+              <i class="bi bi-arrow-repeat"></i> Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="table-card p-3 mb-3">
+          <div id="reportStatsGrid" class="row g-2"></div>
+        </div>
+
+        <div class="table-card p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Message preview</h6>
+            <div>
+              <button class="btn btn-sm btn-outline-secondary" onclick="copyReportMessage()">
+                <i class="bi bi-clipboard"></i> Copy
+              </button>
+              <button class="btn btn-sm btn-success" onclick="shareReportOnWhatsApp()">
+                <i class="bi bi-whatsapp"></i> Share on WhatsApp
+              </button>
+            </div>
+          </div>
+          <pre id="reportMessageBox" class="report-message-box"></pre>
+        </div>
+        </div><!-- /dailyReportPanel -->
+
+        <!-- Module 3: Campaign Reports -->
+        <div id="campaignReportsPanel" class="d-none">
+          <!-- Rendered dynamically by campaign-reports.js → renderCampaignReportsPanel() -->
+        </div>
+      </section>
+
+      <!-- LEAVE MANAGEMENT VIEW (Admin / Super Admin / Member own) -->
+      <section id="view-leave" class="view-section d-none">
+        <!-- Rendered dynamically by leave.js → renderLeaveView() -->
+      </section>
+
+      <!-- HR TRANSFERS VIEW (Admin / Super Admin) -->
+      <section id="view-hrtransfers" class="view-section d-none">
+        <div id="hrTransfersContentArea">
+          <!-- Rendered dynamically by hr-transfers.js → loadHRTransfersView() -->
+        </div>
+      </section>
+
+      <!-- DASHBOARD OVERVIEW (Admin / Super Admin) -->
+      <section id="view-dashboard" class="view-section d-none">
+        <div class="mb-4">
+          <h1 class="page-title"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h1>
+          <p class="page-subtitle">Today's assignment and attendance overview.</p>
+        </div>
+        <div id="dashboardCardsGrid" class="row g-3 mb-4"></div>
+        <div id="dashboardPendingList"></div>
+        <!-- Module 2: Campaign Analytics — appended, rendered by campaign-analytics.js -->
+        <div id="campaignAnalyticsWrap"></div>
+      </section>
+
+      <!-- CALL AUDIT VIEW (Admin / Super Admin) -->
+      <section id="view-callaudit" class="view-section d-none">
+        <!-- Rendered dynamically by call-audit.js → renderCallAuditDashboard() -->
+      </section>
+
+      <!-- AUDIT LOG VIEW (Admin / Super Admin) -->
+      <section id="view-auditlog" class="view-section d-none">
+        <div class="mb-4">
+          <h1 class="page-title"><i class="bi bi-journal-text me-2"></i>Audit Log</h1>
+          <p class="page-subtitle">Every automatic assignment action, with reason and timestamp.</p>
+        </div>
+        <div id="auditLogBody">
+          <div class="text-center text-muted py-5">Loading audit log…</div>
+        </div>
+      </section>
+
+      <!-- CRM SETTINGS VIEW (Super Admin only) -->
+      <section id="view-crmsettings" class="view-section d-none">
+        <!-- Rendered dynamically by settings.js → renderCRMSettingsView() -->
+      </section>
+
+      <!-- PERMISSION SETTINGS VIEW (Super Admin only) -->
+      <section id="view-permissions" class="view-section d-none">
+        <!-- Rendered dynamically by permissions.js → renderPermissionSettingsView() -->
+      </section>
+
+      <!-- AI SETTINGS VIEW (All roles) -->
+      <section id="view-aisettings" class="view-section d-none">
+        <!-- Rendered dynamically by ai.js → renderAISettingsView() -->
+      </section>
+
+      <!-- MANAGE TEAM VIEW (Super Admin) -->
+      <section id="view-users" class="view-section d-none">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h1 class="page-title">Manage Team</h1>
+            <p class="page-subtitle">Only accounts added here can sign in to the CRM.</p>
+          </div>
+          <button class="btn btn-brand" data-bs-toggle="modal" data-bs-target="#addUserModal">
+            <i class="bi bi-person-plus"></i> Add Team Member
+          </button>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="table align-middle table-hover mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Telegram</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody">
+                <tr><td colspan="6" class="text-center py-4 text-muted">Loading team...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- CAMPAIGN FORM BUILDER VIEW (Super Admin only) -->
+      <section id="view-campaigns" class="view-section d-none">
+        <!-- Rendered dynamically by campaigns.js → renderCampaignsView() -->
+      </section>
+
+      <!-- CAMPAIGN REPORTS VIEW (Admin / Super Admin) -->
+      <section id="view-campaignreports" class="view-section d-none">
+        <!-- Rendered dynamically by campaign-reports.js → renderCampaignReportsPanel() -->
+      </section>
+
+      <!-- SALES ACADEMY VIEW (All Roles) -->
+      <section id="view-training" class="view-section d-none">
+        <div id="trainingContentArea">
+          <div class="text-center py-5">
+            <div class="spinner-border text-primary"></div>
+            <p class="mt-2">Loading Sales Academy...</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- TOASTS -->
+  <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+  <!-- MODAL: Table Preferences -->
+  <div class="modal fade" id="tablePreferencesModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-sliders me-2"></i>Table Preferences
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted mb-3">
+            Customize which columns appear in your Leads table. Your preferences are saved automatically.
+          </p>
+          
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Visible Columns</label>
+            <div class="d-flex flex-column gap-2">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="prefShowCampaign" checked>
+                <label class="form-check-label" for="prefShowCampaign">
+                  Campaign
+                </label>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="prefShowAssigned" checked>
+                <label class="form-check-label" for="prefShowAssigned">
+                  Assigned To
+                </label>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Table Density</label>
+            <select id="prefTableDensity" class="form-select form-select-sm">
+              <option value="comfortable">Comfortable (Default)</option>
+              <option value="compact">Compact</option>
+              <option value="spacious">Spacious</option>
+            </select>
+          </div>
+          
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Default Page Size</label>
+            <select id="prefDefaultPageSize" class="form-select form-select-sm">
+              <option value="25">25 leads per page</option>
+              <option value="50">50 leads per page</option>
+              <option value="100">100 leads per page</option>
+            </select>
+          </div>
+          
+          <div class="alert alert-info small mb-0">
+            <i class="bi bi-info-circle me-1"></i>
+            Your preferences are saved to your account and will apply across all devices.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" onclick="resetTablePreferences()">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to Default
+          </button>
+          <button type="button" class="btn btn-brand" onclick="saveTablePreferences()">
+            <i class="bi bi-check-lg me-1"></i>Save Preferences
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Add Lead -->
+  <div class="modal fade" id="addLeadModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form id="addLeadForm">
+          <div class="modal-header">
+            <h5 class="modal-title">Add New Lead</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Campaign Type <span class="text-danger">*</span></label>
+              <select class="form-select" id="leadCampaign" required onchange="onLeadCampaignChange()">
+                <option value="">Select Campaign…</option>
+                <option value="__none__">General / No Campaign</option>
+              </select>
+              <div class="form-text">Fields shown below update instantly based on the campaign selected — no page refresh.</div>
+            </div>
+
+            <div class="mb-3 d-none" id="legacyServiceWrap">
+              <label class="form-label">What service you need</label>
+              <input type="text" class="form-control" id="leadService" placeholder="e.g. Air freight, Sea freight...">
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Full name</label>
+              <input type="text" class="form-control" id="leadFullName" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Phone number</label>
+              <input type="tel" class="form-control" id="leadPhone" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" id="leadEmail">
+            </div>
+
+            <div class="mb-3 d-none" id="legacyCompanyWrap">
+              <label class="form-label">Company name</label>
+              <input type="text" class="form-control" id="leadCompany">
+            </div>
+
+            <div id="campaignFieldsContainer"></div>
+
+            <p class="small text-muted mb-0"><i class="bi bi-info-circle"></i> Sl.No and timestamp are generated automatically. The lead will be auto-assigned based on the campaign's default assignment role and availability rules.</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" id="addLeadSubmitBtn" class="btn btn-brand">Add Lead</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Update Status -->
+  <div class="modal fade" id="statusModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form id="statusUpdateForm">
+          <div class="modal-header">
+            <h5 class="modal-title">Update Status — <span id="statusModalLeadName"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Status</label>
+              <select id="statusSelect" class="form-select"></select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Note / Call summary</label>
+              <textarea id="statusNote" class="form-control" rows="3" placeholder="What was discussed with the customer..."></textarea>
+            </div>
+            <!-- Call Audit Notice for Members -->
+            <div id="callAuditNotice" class="alert alert-info d-none mb-2 py-2">
+              <i class="bi bi-info-circle-fill me-2"></i>
+              <strong>Note:</strong> To mark a lead as "Not Interested", you must upload a call recording for admin approval.
+            </div>
+            <p class="small text-muted mb-0"><i class="bi bi-info-circle"></i> Busy → reminder in 1 hr. Not Picking Call → reminder in 4 hrs.</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-brand">Save Update</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: History -->
+  <div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Contact History — <span id="historyModalLeadName"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="historyModalBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Lead Details (👁 View) -->
+  <div class="modal fade" id="leadDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="leadDetailsModalTitle">Lead Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="leadDetailsModalBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Training Player -->
+  <div class="modal fade" id="trainingPlayerModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Training Builder -->
+  <div class="modal fade" id="trainingBuilderModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <!-- Content populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Section Editor -->
+  <div class="modal fade" id="sectionEditorModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-journal-text me-2"></i>Edit Section</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="sectionEditorForm">
+            <input type="hidden" id="editingSectionIndex" value="-1">
+            <div class="mb-3">
+              <label class="form-label">Section Title *</label>
+              <input type="text" class="form-control" id="sectionTitle" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Content Type *</label>
+              <select class="form-select" id="sectionType" onchange="toggleSectionFields()" required>
+                <option value="text">Text/Article</option>
+                <option value="video">Video</option>
+                <option value="pdf">PDF Document</option>
+                <option value="image">Image</option>
+                <option value="quiz">Quiz</option>
+              </select>
+            </div>
+            <div id="fieldText" class="mb-3">
+              <label class="form-label">Text Content</label>
+              <textarea class="form-control" id="sectionContent" rows="6"></textarea>
+            </div>
+            <div id="fieldVideo" class="mb-3 d-none">
+              <label class="form-label">Video URL (YouTube, Vimeo, etc.)</label>
+              <input type="url" class="form-control" id="sectionVideoUrl">
+            </div>
+            <div id="fieldPdf" class="mb-3 d-none">
+              <label class="form-label">PDF URL</label>
+              <input type="url" class="form-control" id="sectionPdfUrl">
+            </div>
+            <div id="fieldImage" class="mb-3 d-none">
+              <label class="form-label">Image URL</label>
+              <input type="url" class="form-control" id="sectionImageUrl">
+            </div>
+            <div id="fieldQuiz" class="mb-3 d-none">
+              <label class="form-label">Quiz Questions</label>
+              <div id="sectionQuizQuestions"></div>
+              <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="addQuizQuestion()">
+                <i class="bi bi-plus-lg me-1"></i>Add Question
+              </button>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="saveSectionToBuilder()">
+            <i class="bi bi-save me-1"></i>Save Section
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Category Manager -->
+  <div class="modal fade" id="categoryManagerModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <!-- Content populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Knowledge Base -->
+  <div class="modal fade" id="knowledgeBaseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <!-- Content populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Training Reports -->
+  <div class="modal fade" id="trainingReportsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <!-- Content populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Create / Edit Campaign (Super Admin) -->
+  <div class="modal fade" id="campaignModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="campaignModalTitle">Create Campaign</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="campaignId">
+          <div class="mb-3">
+            <label class="form-label">Campaign Name</label>
+            <input type="text" class="form-control" id="campaignName" placeholder="e.g. Freight Services, Warehousing, Sea Freight...">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Default Assignment Role</label>
+            <select class="form-select" id="campaignDefaultAssignmentRole" required>
+              <option value="">Select role…</option>
+            </select>
+            <div class="form-text">Select which role should receive leads created for this campaign by default.</div>
+          </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="campaignActive" checked>
+            <label class="form-check-label" for="campaignActive">Active (visible in Add Lead)</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-brand" onclick="saveCampaign()">Save Campaign</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Campaign Details (View action / Analytics drill-down / Report drill-down) -->
+  <div class="modal fade" id="campaignDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="campaignDetailsModalTitle">Campaign Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="campaignDetailsModalBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Campaign Field Builder (Super Admin) -->
+  <div class="modal fade" id="fieldBuilderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="fieldBuilderModalTitle">Form Fields</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted">
+            Full Name, Mobile Number, and Email are permanent system fields and always appear first —
+            they are never shown here and cannot be edited, reordered, or deleted.
+          </p>
+          <div id="fieldBuilderRows"></div>
+          <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="addFieldRow()">
+            <i class="bi bi-plus-lg me-1"></i>Add Field
+          </button>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-brand" onclick="saveFieldBuilder()">
+            <i class="bi bi-floppy-fill me-1"></i>Save Fields
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Call Audit Upload (Sales Member) -->
+  <div class="modal fade" id="callAuditUploadModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #0F2C46, #E8A33D); color: #fff; border: none;">
+          <h5 class="modal-title">
+            <i class="bi bi-clipboard-check me-2"></i>Call Audit Required
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning mb-3">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <strong>Mandatory:</strong> You must upload a call recording before marking this lead as "Not Interested".
+          </div>
+          
+          <!-- Lead Info -->
+          <div class="card mb-3">
+            <div class="card-body py-2">
+              <div class="row g-2">
+                <div class="col-md-6">
+                  <small class="text-muted">Customer</small>
+                  <div class="fw-semibold" id="callAuditLeadName">—</div>
+                </div>
+                <div class="col-md-6">
+                  <small class="text-muted">Phone</small>
+                  <div class="fw-semibold" id="callAuditLeadPhone">—</div>
+                </div>
+                <div class="col-md-6">
+                  <small class="text-muted">Company</small>
+                  <div class="fw-semibold" id="callAuditLeadCompany">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Upload Recording -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              <i class="bi bi-mic-fill me-1"></i>Call Recording <span class="text-danger">*</span>
+            </label>
+            <input type="file" 
+                   class="form-control" 
+                   id="callAuditRecordingFile"
+                   accept="audio/*,video/mp4,video/webm"
+                   onchange="handleCallAuditFileSelect(this)">
+            <div class="form-text">
+              Supported formats: MP3, WAV, M4A, AAC, OGG, WebM, MP4 (Audio). No size limit.
+            </div>
+            <div id="callAuditRecordingInfo" class="mt-2 d-none">
+              <span class="badge bg-info"><i class="bi bi-clock me-1"></i>Duration: <span id="callAuditRecordingDuration">0:00</span></span>
+            </div>
+          </div>
+          
+          <!-- Upload Progress -->
+          <div id="callAuditUploadProgressWrap" class="mb-3 d-none">
+            <div class="progress" style="height: 20px;">
+              <div id="callAuditUploadProgress" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+            </div>
+            <small id="callAuditUploadProgressText" class="text-muted"></small>
+          </div>
+          
+          <!-- Reason -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              <i class="bi bi-chat-left-text me-1"></i>Reason <span class="text-danger">*</span>
+            </label>
+            <select id="callAuditReason" class="form-select" required>
+              <option value="">-- Select Reason --</option>
+            </select>
+          </div>
+          
+          <!-- Remarks -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              <i class="bi bi-pencil me-1"></i>Remarks (Optional)
+            </label>
+            <textarea id="callAuditRemarks" class="form-control" rows="3" placeholder="Additional details about the conversation..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="callAuditSubmitBtn" class="btn btn-brand" onclick="submitCallAuditRequest()" disabled>
+            <i class="bi bi-check-lg me-1"></i>Submit for Approval
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Call Audit Review (Admin / Super Admin) -->
+  <div class="modal fade" id="callAuditReviewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #0F2C46, #E8A33D); color: #fff; border: none;">
+          <h5 class="modal-title">
+            <i class="bi bi-clipboard-check me-2"></i>Call Audit Review
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-4">
+            <!-- Customer Details -->
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-header bg-light py-2">
+                  <i class="bi bi-person-fill me-1"></i>Customer Details
+                </div>
+                <div class="card-body py-2">
+                  <div class="row g-2">
+                    <div class="col-6">
+                      <small class="text-muted">Name</small>
+                      <div class="fw-semibold" id="callAuditReviewLeadName">—</div>
+                    </div>
+                    <div class="col-6">
+                      <small class="text-muted">Phone</small>
+                      <div class="fw-semibold" id="callAuditReviewLeadPhone">—</div>
+                    </div>
+                    <div class="col-6">
+                      <small class="text-muted">Company</small>
+                      <div class="fw-semibold" id="callAuditReviewLeadCompany">—</div>
+                    </div>
+                    <div class="col-6">
+                      <small class="text-muted">Service Needed</small>
+                      <div class="fw-semibold" id="callAuditReviewLeadService">—</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Sales Member Info -->
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-header bg-light py-2">
+                  <i class="bi bi-person-badge me-1"></i>Sales Member
+                </div>
+                <div class="card-body py-2">
+                  <div class="row g-2">
+                    <div class="col-6">
+                      <small class="text-muted">Name</small>
+                      <div class="fw-semibold" id="callAuditReviewSalesMember">—</div>
+                    </div>
+                    <div class="col-6">
+                      <small class="text-muted">Requested Date</small>
+                      <div class="fw-semibold" id="callAuditReviewDate">—</div>
+                    </div>
+                    <div class="col-12">
+                      <small class="text-muted">Status</small>
+                      <div id="callAuditReviewStatus">—</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Reason & Remarks -->
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-header bg-light py-2">
+                  <i class="bi bi-chat-left-text me-1"></i>Reason & Remarks
+                </div>
+                <div class="card-body py-2">
+                  <div class="mb-2">
+                    <small class="text-muted">Reason</small>
+                    <div class="fw-semibold" id="callAuditReviewReason">—</div>
+                  </div>
+                  <div>
+                    <small class="text-muted">Sales Member Remarks</small>
+                    <div id="callAuditReviewRemarks">—</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Audio Player -->
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-header bg-light py-2">
+                  <i class="bi bi-mic-fill me-1"></i>Call Recording
+                </div>
+                <div class="card-body py-2">
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <i class="bi bi-file-earmark-music"></i>
+                    <span id="callAuditReviewFileName">—</span>
+                    <span class="badge bg-secondary ms-auto" id="callAuditReviewDuration">—</span>
+                  </div>
+                  <audio id="callAuditReviewAudio" controls class="w-100" style="height: 40px;"></audio>
+                  <div class="mt-2">
+                    <a id="callAuditReviewDownloadBtn" class="btn btn-sm btn-outline-primary" download>
+                      <i class="bi bi-download me-1"></i>Download Recording
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Approval Info (shown after review) -->
+            <div id="callAuditReviewApprovalInfo" class="col-12 d-none">
+              <div class="card bg-light">
+                <div class="card-body py-2">
+                  <div class="row g-2">
+                    <div class="col-md-6">
+                      <small class="text-muted">Reviewed By</small>
+                      <div class="fw-semibold" id="callAuditReviewReviewedBy">—</div>
+                    </div>
+                    <div class="col-md-6">
+                      <small class="text-muted">Reviewed At</small>
+                      <div class="fw-semibold" id="callAuditReviewReviewedAt">—</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Admin Remarks -->
+            <div class="col-12">
+              <label class="form-label fw-semibold">
+                <i class="bi bi-pencil me-1"></i>Admin Remarks
+              </label>
+              <textarea id="callAuditReviewAdminRemarks" class="form-control" rows="3" placeholder="Add your remarks for this review..."></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <div id="callAuditReviewActions" class="d-flex gap-2">
+            <button type="button" class="btn btn-success" onclick="approveCallAudit(false)">
+              <i class="bi bi-check-circle me-1"></i>Approve
+            </button>
+            <button type="button" class="btn btn-outline-success" onclick="approveCallAudit(true)">
+              <i class="bi bi-check-circle-fill me-1"></i>Approve with Remarks
+            </button>
+            <button type="button" class="btn btn-danger" onclick="rejectCallAudit()">
+              <i class="bi bi-x-circle me-1"></i>Reject
+            </button>
+            <button type="button" class="btn btn-info" onclick="requestRecallAudit()">
+              <i class="bi bi-telephone me-1"></i>Request Re-Call
+            </button>
+          </div>
+          <button type="button" class="btn btn-outline-secondary ms-auto" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Manual Lead Assignment -->
+  <div class="modal fade" id="manualAssignmentModal" tabindex="-1" aria-labelledby="manualAssignmentModalLabel" aria-modal="true" role="dialog">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="manualAssignmentModalLabel">
+            <i class="bi bi-person-check-fill me-2"></i>Manual Lead Assignment
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="small text-muted">Lead ID</div>
+              <div class="fw-semibold" id="manualAssignmentLeadId">—</div>
+            </div>
+            <div class="col-md-6">
+              <div class="small text-muted">Customer Name</div>
+              <div class="fw-semibold" id="manualAssignmentLeadName">—</div>
+            </div>
+            <div class="col-md-6">
+              <div class="small text-muted">Phone Number</div>
+              <div class="fw-semibold" id="manualAssignmentLeadPhone">—</div>
+            </div>
+            <div class="col-md-6">
+              <div class="small text-muted">Campaign</div>
+              <div class="fw-semibold" id="manualAssignmentLeadCampaign">—</div>
+            </div>
+            <div class="col-md-6">
+              <div class="small text-muted">Created Date</div>
+              <div class="fw-semibold" id="manualAssignmentLeadCreated">—</div>
+            </div>
+            <div class="col-md-6">
+              <div class="small text-muted">Current Status</div>
+              <div class="fw-semibold" id="manualAssignmentLeadStatus">—</div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Assign To</label>
+            <select id="manualAssignmentEmployeeSelect" class="form-select"></select>
+          </div>
+
+          <div id="manualAssignmentEmployeesList" class="small text-muted"></div>
+
+          <div class="form-check mt-3" id="manualOverrideWrap" style="display:none">
+            <input class="form-check-input" type="checkbox" id="manualOverrideOfficeHours">
+            <label class="form-check-label" for="manualOverrideOfficeHours">Override Office Hours</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="manualAssignmentConfirmBtn" class="btn btn-brand" onclick="confirmManualLeadAssignment()">
+            <i class="bi bi-person-check-fill me-1"></i>Assign Lead
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Holiday Welcome (shown on login day after a holiday) -->
+  <div class="modal fade" id="holidayWelcomeModal" tabindex="-1" aria-modal="true" role="dialog">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header" style="background:linear-gradient(135deg,#0F2C46,#E8A33D);color:#fff;border:none">
+          <h5 class="modal-title fw-bold">
+            <i class="bi bi-sun-fill me-2"></i>Welcome Back!
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="holidayWelcomeBody" style="padding:24px"></div>
+        <div class="modal-footer border-0 justify-content-center pb-4">
+          <button class="btn btn-brand px-5" data-bs-dismiss="modal">Let's Go! 🚀</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: AI Welcome (first login, no key configured) -->
+  <div class="modal fade" id="aiWelcomeModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-labelledby="aiWelcomeModalLabel" aria-modal="true" role="dialog">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header pitch-modal-header">
+          <h5 class="modal-title" id="aiWelcomeModalLabel">
+            <i class="bi bi-robot me-2"></i>Welcome to AI Features
+          </h5>
+        </div>
+        <div class="modal-body text-center py-4">
+          <div class="ai-welcome-icon mb-3"><i class="bi bi-key-fill"></i></div>
+          <h6 class="fw-bold mb-2">Configure your Groq API Key</h6>
+          <p class="text-muted mb-0">
+            To use AI features like Sales Pitch Generator, please configure your personal Groq API Key.<br>
+            It's <strong>free</strong> and takes less than a minute.
+          </p>
+        </div>
+        <div class="modal-footer justify-content-center gap-2 border-0 pb-4">
+          <button class="btn btn-brand px-4" onclick="
+            bootstrap.Modal.getInstance(document.getElementById('aiWelcomeModal'))?.hide();
+            document.querySelectorAll('.nav-item-link').forEach(l => l.classList.remove('active'));
+            document.querySelector('[data-view=aisettings]')?.classList.add('active');
+            showView('aisettings');
+          ">
+            <i class="bi bi-gear-fill me-2"></i>Configure Now
+          </button>
+          <button class="btn btn-outline-secondary px-4" data-bs-dismiss="modal">
+            Skip for now
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: AI Key Missing (shown when user triggers an AI feature without a key) -->
+  <div class="modal fade" id="aiKeyMissingModal" tabindex="-1" aria-labelledby="aiKeyMissingModalLabel" aria-modal="true" role="dialog">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header pitch-modal-header">
+          <h5 class="modal-title" id="aiKeyMissingModalLabel">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>API Key Not Configured
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body text-center py-4">
+          <div class="ai-welcome-icon ai-welcome-icon-warn mb-3"><i class="bi bi-lock-fill"></i></div>
+          <p class="mb-0 text-muted">
+            You haven't configured your Groq API Key.<br>
+            Open <strong>AI Settings</strong> to add your key and unlock all AI features.
+          </p>
+        </div>
+        <div class="modal-footer justify-content-center gap-2 border-0 pb-4">
+          <button class="btn btn-brand px-4" onclick="openAISettingsFromMissingModal()">
+            <i class="bi bi-gear-fill me-2"></i>Open AI Settings
+          </button>
+          <button class="btn btn-outline-secondary px-4" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: AI Sales Pitch -->
+  <div class="modal fade" id="salesPitchModal" tabindex="-1" aria-labelledby="salesPitchModalLabel" aria-modal="true" role="dialog">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+
+        <div class="modal-header pitch-modal-header">
+          <div>
+            <h5 class="modal-title" id="salesPitchModalLabel">
+              <i class="bi bi-robot me-2"></i>AI Sales Pitch
+            </h5>
+            <div class="pitch-modal-lead-name" id="pitchModalLeadName"></div>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body pitch-modal-body">
+
+          <!-- Loading state -->
+          <div id="pitchSpinner" class="pitch-spinner-wrap">
+            <div class="spinner-border pitch-spinner" role="status" aria-hidden="true"></div>
+            <div class="pitch-spinner-text">Generating AI Sales Pitch…</div>
+          </div>
+
+          <!-- Generated pitch output -->
+          <div id="pitchOutput" class="pitch-output d-none" aria-live="polite"></div>
+
+        </div>
+
+        <div class="modal-footer pitch-modal-footer">
+          <button id="pitchCopyBtn"
+                  class="btn btn-outline-secondary btn-sm"
+                  onclick="copyPitch()"
+                  disabled>
+            <i class="bi bi-clipboard me-1"></i>Copy Pitch
+          </button>
+          <button id="pitchRegenBtn"
+                  class="btn btn-outline-primary btn-sm"
+                  onclick="regeneratePitch()"
+                  disabled>
+            <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
+          </button>
+          <button id="pitchWhatsAppBtn"
+                  class="btn btn-success btn-sm"
+                  onclick="sendToWhatsApp()"
+                  disabled>
+            <i class="bi bi-whatsapp me-1"></i>Send to WhatsApp
+          </button>
+          <button type="button" class="btn btn-outline-light btn-sm" data-bs-dismiss="modal">
+            Close
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Add User (Super Admin) -->
+  <div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form id="addUserForm">
+          <div class="modal-header">
+            <h5 class="modal-title">Add Team Member</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Full name</label>
+              <input type="text" class="form-control" id="newUserName" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" id="newUserEmail" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Temporary password</label>
+              <input type="password" class="form-control" id="newUserPassword" minlength="6" required>
+              <div class="form-text">They can reset this later via "Forgot password".</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Role</label>
+              <select id="newUserRole" class="form-select" required>
+                <option value="member">Sales Member</option>
+                <option value="admin">Admin</option>
+                <option value="hr">HR</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" id="addUserSubmitBtn" class="btn btn-brand">Add Team Member</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Schedule Follow-up (Mandatory for "Call Back Later") -->
+  <div class="modal fade" id="scheduleFollowUpModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #0F2C46, #E8A33D); color: #fff; border: none;">
+          <h5 class="modal-title">
+            <i class="bi bi-calendar-check me-2"></i>Schedule Follow-up
+          </h5>
+          <button type="button" class="btn-close btn-close-white" onclick="cancelFollowUpSchedule()"></button>
+        </div>
+        <form id="scheduleFollowUpForm">
+          <div class="modal-body">
+            <div class="alert alert-info mb-3">
+              <i class="bi bi-info-circle-fill me-2"></i>
+              <strong>Required:</strong> You must schedule a follow-up before marking this lead as "Call Back Later".
+            </div>
+
+            <!-- Customer Info -->
+            <div class="card mb-3">
+              <div class="card-body py-2">
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <small class="text-muted">Customer</small>
+                    <div class="fw-semibold" id="followUpLeadName">—</div>
+                  </div>
+                  <div class="col-md-6">
+                    <small class="text-muted">Phone</small>
+                    <div class="fw-semibold" id="followUpLeadPhone">—</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Validation Messages -->
+            <div id="followUpValidationMessages"></div>
+
+            <!-- Date & Time -->
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">
+                  <i class="bi bi-calendar3 me-1"></i>Follow-up Date <span class="text-danger">*</span>
+                </label>
+                <input type="date" class="form-control" id="followUpDate" required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">
+                  <i class="bi bi-clock me-1"></i>Follow-up Time <span class="text-danger">*</span>
+                </label>
+                <input type="time" class="form-control" id="followUpTime" required>
+              </div>
+            </div>
+
+            <!-- Contact Method -->
+            <div class="mb-3">
+              <label class="form-label fw-semibold">
+                <i class="bi bi-telephone me-1"></i>Preferred Contact Method
+              </label>
+              <div class="d-flex gap-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="followUpContactMethod" id="followUpCall" value="Call" checked>
+                  <label class="form-check-label" for="followUpCall">
+                    <i class="bi bi-telephone-fill me-1"></i>Call
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="followUpContactMethod" id="followUpWhatsApp" value="WhatsApp">
+                  <label class="form-check-label" for="followUpWhatsApp">
+                    <i class="bi bi-whatsapp me-1"></i>WhatsApp
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="followUpContactMethod" id="followUpEmail" value="Email">
+                  <label class="form-check-label" for="followUpEmail">
+                    <i class="bi bi-envelope-fill me-1"></i>Email
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Preferred Time of Day -->
+            <div class="mb-3">
+              <label class="form-label fw-semibold">
+                <i class="bi bi-sun me-1"></i>Preferred Time of Day
+              </label>
+              <div class="d-flex gap-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="followUpPreferredTime" id="followUpMorning" value="Morning" checked>
+                  <label class="form-check-label" for="followUpMorning">
+                    <i class="bi bi-sunrise me-1"></i>Morning
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="followUpPreferredTime" id="followUpAfternoon" value="Afternoon">
+                  <label class="form-check-label" for="followUpAfternoon">
+                    <i class="bi bi-sun me-1"></i>Afternoon
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="followUpPreferredTime" id="followUpEvening" value="Evening">
+                  <label class="form-check-label" for="followUpEvening">
+                    <i class="bi bi-sunset me-1"></i>Evening
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Remark -->
+            <div class="mb-3">
+              <label class="form-label fw-semibold">
+                <i class="bi bi-chat-left-text me-1"></i>Remark <span class="text-danger">*</span>
+              </label>
+              <textarea id="followUpRemark" class="form-control" rows="3" required placeholder="Why is this callback needed? What did the customer say?"></textarea>
+              <div class="form-text">Describe the reason for the follow-up and any customer preferences.</div>
+            </div>
+
+            <p class="small text-muted mb-0">
+              <i class="bi bi-info-circle me-1"></i>
+              Follow-up times are validated against working days, holidays, office hours, and break timings from CRM Settings.
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" onclick="cancelFollowUpSchedule()">
+              <i class="bi bi-x-lg me-1"></i>Cancel
+            </button>
+            <button type="submit" class="btn btn-brand">
+              <i class="bi bi-check-lg me-1"></i>Schedule Follow-up
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="js/firebase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/campaigns.js"></script>
+  <script src="js/assignment.js"></script>
+  <script src="js/leave.js"></script>
+  <script src="js/hr-transfers.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/call-audit.js"></script>
+  <script src="js/leads.js"></script>
+  <script src="js/users.js"></script>
+  <script src="js/report.js"></script>
+  <script src="js/campaign-utils.js"></script>
+  <script src="js/permissions.js"></script>
+  <script src="js/telegram-config.js"></script>
+  <script src="js/telegram.js"></script>
+  <script src="js/campaign-analytics.js"></script>
+  <script src="js/campaign-reports.js"></script>
+  <script src="js/pitch.js"></script>
+  <script src="js/training.js"></script>
+  <script src="js/training-admin.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Reveal "Add Lead" button only for Admin / Super Admin, after role is known
+    const addLeadObserver = setInterval(() => {
+      if (window.CURRENT_USER) {
+        clearInterval(addLeadObserver);
+        if (CURRENT_USER.role === "superadmin" || (window.hasPermission && window.hasPermission("leads.create"))) {
+          document.getElementById("addLeadBtnWrap").innerHTML = `
+            <button class="btn btn-brand" data-bs-toggle="modal" data-bs-target="#addLeadModal">
+              <i class="bi bi-plus-lg"></i> Add Lead
+            </button>`;
+        }
+      }
+    }, 150);
+  </script>
+</body>
+</html>

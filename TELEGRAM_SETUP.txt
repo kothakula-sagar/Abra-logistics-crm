@@ -1,0 +1,112 @@
+ABRA LOGISTICS CRM — TELEGRAM NOTIFICATIONS SETUP
+==================================================
+
+WHAT THIS UPDATE ADDS
+---------------------
+1. Every CRM user gets a Telegram page.
+2. A member can securely connect their own Telegram account.
+3. When a lead is assigned, the assigned member receives a Telegram message.
+4. When a lead remains "Not Open" after its dueTime, the member receives one overdue reminder.
+5. The existing CRM reminderAfterMinutes setting controls the lead due time.
+6. Super Admin can enable/disable Telegram new-lead and overdue alerts in CRM Settings.
+7. The bot uses a Telegram webhook. No local long-polling process is required.
+
+FILES
+-----
+server.js                 Node/Express + Firebase Admin + Telegram backend
+package.json              Backend dependencies and start command
+.env.example              Environment variable template
+js/telegram-config.js      Frontend backend URL configuration
+js/telegram.js             Member connect/disconnect UI
+
+DEPLOYMENT ON RENDER
+--------------------
+Create a Web Service from this repository.
+
+Build command:
+npm install
+
+Start command:
+npm start
+
+The service can host both the CRM frontend and the Telegram backend.
+
+RENDER ENVIRONMENT VARIABLES
+----------------------------
+BOT_TOKEN
+    Token from BotFather.
+
+FIREBASE_SERVICE_ACCOUNT_JSON
+    The complete Firebase service-account JSON as one environment variable.
+    Create it in Firebase Console > Project Settings > Service Accounts > Generate new private key.
+    Do NOT upload the JSON file to GitHub.
+
+PUBLIC_BASE_URL
+    Optional if Render provides RENDER_EXTERNAL_URL. If set, use the exact public Render URL.
+
+TELEGRAM_WEBHOOK_SECRET
+    A random secret string, for example a long random value.
+
+FRONTEND_ORIGIN
+    Leave as * when the CRM frontend is served by this same Render service.
+    If the frontend is hosted elsewhere, set the exact frontend origin.
+
+TELEGRAM_LINK_CODE_TTL_MINUTES
+    Optional. Default: 10.
+
+TELEGRAM_REMINDER_SCAN_MS
+    Optional. Default: 60000.
+
+TELEGRAM CONNECTION FLOW
+------------------------
+1. Member signs in.
+2. Member opens Telegram in the CRM sidebar.
+3. Clicks Connect Telegram.
+4. CRM creates a short-lived connection code.
+5. Member clicks Open Telegram Bot.
+6. Bot receives /start <code> through the webhook.
+7. Backend verifies the code and saves the member's Telegram chat ID in users/{uid}.
+8. CRM shows Telegram as connected.
+
+TELEGRAM BOT COMMANDS
+---------------------
+/start <code>   Connect the Telegram account from the CRM.
+/status         Show connection status.
+/disconnect     Disconnect the current Telegram account.
+
+SECURITY
+--------
+- Bot token is server-side only.
+- Firebase Admin credentials are server-side only.
+- Telegram connection codes expire.
+- Telegram webhook requests can be protected with TELEGRAM_WEBHOOK_SECRET.
+- Members cannot choose another member's Telegram chat ID from the CRM UI.
+
+IMPORTANT
+---------
+If this bot was previously running with getUpdates()/long polling on another computer or server,
+stop that old process. This version uses a webhook and must be the only webhook configuration for
+this bot token.
+
+AFTER DEPLOYMENT
+----------------
+1. Open the public CRM URL.
+2. Sign in as a member.
+3. Open Telegram in the CRM.
+4. Connect Telegram.
+5. Send /status in the bot.
+6. Create or assign a test lead to that member.
+7. Confirm the Telegram notification arrives.
+8. For the overdue test, set CRM reminderAfterMinutes to a small test value and leave the lead as Not Open.
+
+FIRESTORE
+---------
+The backend uses Firebase Admin SDK, so it can update users and notification delivery records
+without weakening your existing client Firestore security rules.
+
+The following server-side collections are created automatically:
+- telegramLinkCodes
+- telegramDeliveries
+- telegramSystem
+
+No Firebase client secret or bot token belongs in frontend JavaScript.
