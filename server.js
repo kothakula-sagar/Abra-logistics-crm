@@ -2381,253 +2381,545 @@ async function runNotificationCycle() {
 
 
 // ============================================================
+// TELEGRAM REPORT / TEAM NOTIFICATION HELPERS
+// ============================================================
+
+async function getTelegramCRMUserByChatId(chatId) {
+  const snapshot = await db
+    .collection('users')
+    .where('telegramChatId', '==', String(chatId))
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) {
+    return null;
+  }
+
+  return {
+    id: snapshot.docs[0].id,
+    ...snapshot.docs[0].data()
+  };
+}
+
+function reportStatusCount(report) {
+  return [
+    ['Interested', report.interested],
+    ['Not Interested', report.notInterested],
+    ['Drivers', report.drivers],
+    ['Transporters', report.transporters],
+    ['Job Seekers', report.jobSeekers],
+    ['Busy / Call Back Later', report.callBackLater],
+    ['Not Picking Call', report.notPickingCall],
+    ['Pending / Not Contacted', report.notOpen]
+  ];
+}
+
+function telegramReportMessage(report, dateKey, title = 'LEAD REPORT') {
+  const dateLabel = formatDailyReportDate(dateKey);
+  const lines = [
+    `📊 <b>${escapeHtml(title)}</b>`,
+    `<b>Date:</b> ${escapeHtml(dateLabel)}`,
+    '',
+    `<b>Total leads received:</b> ${report.total}`,
+    ''
+  ];
+
+  for (const [label, count] of reportStatusCount(report)) {
+    lines.push(`<b>${escapeHtml(label)}:</b> ${count}`);
+  }
+
+  if (report.topMembers?.length) {
+    lines.push('', '<b>👥 Top assigned members</b>');
+    report.topMembers.forEach((member, index) => {
+      lines.push(`${index + 1}. ${escapeHtml(member.name)} — ${member.count}`);
+    });
+  }
+
+  if (report.total === 0) {
+    lines.push('', 'No leads were received on this date.');
+  }
+
+  if (PUBLIC_BASE_URL) {
+    lines.push(
+      '',
+      `<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function parseTelegramReportDate(value, timezone = 'Asia/Kolkata') {
+  const normalized = String(value || '').trim().toLowerCase();
+  const now = new Date();
+
+  if (!normalized || normalized === 'today' || normalized === 'report') {
+    return localDateKey(now, timezone);
+  }
+
+  if (normalized === 'yesterday') {
+    return localDateKey(new Date(now.getTime() - 24 * 60 * 60 * 1000), timezone);
+  }
+
+  let match = normalized.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})$/);
+  if (match) {
+    const date = new Date(Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      12
+    ));
+    return localDateKey(date, timezone);
+  }
+
+  match = normalized.match(/^(\\d{1,2})[\\/.-](\\d{1,2})[\\/.-](\\d{4})$/);
+  if (match) {
+    const date = new Date(Date.UTC(
+      Number(match[3]),
+      Number(match[2]) - 1,
+      Number(match[1]),
+      12
+    ));
+    return localDateKey(date, timezone);
+  }
+
+  return null;
+}
+
+async function buildTelegramCampaignReport(dateKey, timezone = 'Asia/Kolkata') {
+  const snapshot = await db.collection('leads').get();
+  const campaigns = new Map();
+
+  const campaignValue = lead => {
+    const direct = [
+      lead?.campaignName,
+      lead?.campaignTitle,
+      lead?.campaign,
+      lead?.campaignId
+    ];
+
+    for (const value of direct) {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        return String(value).trim();
+      }
+    }
+
+    const data = lead?.campaignData;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const keys = [
+        'campaignName',
+        'campaignTitle',
+        'campaign',
+        'campaignId'
+      ];
+      for (const key of keys) {
+        if (data[key] !== undefined && data[key] !== null && String(data[key]).trim()) {
+          return String(data[key]).trim();
+        }
+      }
+    }
+
+    return 'Unspecified campaign';
+  };
+
+  for (const doc of snapshot.docs) {
+    const lead = { id: doc.id, ...doc.data() };
+    const created = timestampMs(lead.createdAt);
+    if (!created || localDateKey(new Date(created), timezone) !== dateKey) {
+      continue;
+    }
+
+    const name = campaignValue(lead);
+    const current = campaigns.get(name) || {
+      name,
+      leads: 0,
+      interested: 0,
+      notInterested: 0,
+      pending: 0
+    };
+
+    current.leads += 1;
+    const status = normalizedStatus(lead);
+    if (status === 'interested') current.interested += 1;
+    else if (status === 'not interested') current.notInterested += 1;
+    else if (status === 'not open' || status === 'not opened') current.pending += 1;
+
+    campaigns.set(name, current);
+  }
+
+  return Array.from(campaigns.values())
+    .sort((a, b) => b.leads - a.leads || a.name.localeCompare(b.name));
+}
+
+function telegramCampaignReportMessage(campaigns, dateKey) {
+  const dateLabel = formatDailyReportDate(dateKey);
+  const lines = [
+    '📣 <b>CAMPAIGN REPORT</b>',
+    `<b>Date:</b> ${escapeHtml(dateLabel)}`,
+    ''
+  ];
+
+  if (!campaigns.length) {
+    lines.push('No campaign information was found in the leads received on this date.');
+  } else {
+    campaigns.forEach((campaign, index) => {
+      lines.push(
+        `<b>${index + 1}. ${escapeHtml(campaign.name)}</b>`,
+        `Leads: ${campaign.leads} | Interested: ${campaign.interested} | Not Interested: ${campaign.notInterested} | Pending: ${campaign.pending}`,
+        ''
+      );
+    });
+  }
+
+  if (PUBLIC_BASE_URL) {
+    lines.push(`<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`);
+  }
+
+  return lines.join('\n');
+}
+
+async function getTeamOverdueLeads() {
+  const settings = await getCRMSettings();
+  const now = Date.now();
+  const snapshot = await db.collection('leads').get();
+  const groups = new Map();
+  const memberCache = new Map();
+  let unassigned = 0;
+
+  for (const doc of snapshot.docs) {
+    const lead = { id: doc.id, ...doc.data() };
+    const status = normalizedStatus(lead);
+    let due = leadDueTimeMs(lead);
+
+    if (!due && (status === 'not open' || status === 'not opened' || status === 'new')) {
+      const assignedAt = timestampMs(lead.assignedAt);
+      if (assignedAt) {
+        due = assignedAt + (Number(settings.reminderAfterMinutes || 30) * 60 * 1000);
+      }
+    }
+
+    if (!due || now < due) continue;
+
+    const category =
+      status === 'not open' || status === 'not opened' || status === 'new'
+        ? 'not_open'
+        : status === 'call back later' || status === 'callback later' || status === 'follow up' || status === 'follow-up' || status === 'followup'
+          ? 'follow_up'
+          : status === 'not picking call' || status === 'not picking'
+            ? 'not_picking'
+            : null;
+
+    if (!category) continue;
+
+    if (!lead.assignedTo) {
+      unassigned += 1;
+      continue;
+    }
+
+    let member = memberCache.get(lead.assignedTo);
+
+    if (member === undefined) {
+      const memberSnap = await db.collection('users').doc(lead.assignedTo).get();
+      member = memberSnap.exists
+        ? { id: memberSnap.id, ...memberSnap.data() }
+        : null;
+      memberCache.set(lead.assignedTo, member);
+    }
+
+    if (!member) {
+      unassigned += 1;
+      continue;
+    }
+    const group = groups.get(member.id) || {
+      member,
+      leads: []
+    };
+
+    group.leads.push({ ...lead, overdueCategory: category, overdueAt: due });
+    groups.set(member.id, group);
+  }
+
+  const groupsArray = Array.from(groups.values())
+    .map(group => ({
+      memberId: group.member.id,
+      memberName: firstNonEmpty(group.member.name, group.member.email, group.member.id),
+      connected: group.member.active !== false && !!group.member.telegramConnected && !!group.member.telegramChatId,
+      leads: group.leads
+    }))
+    .sort((a, b) => b.leads.length - a.leads.length || a.memberName.localeCompare(b.memberName));
+
+  return {
+    groups: groupsArray,
+    total: groupsArray.reduce((sum, group) => sum + group.leads.length, 0),
+    connectedGroups: groupsArray.filter(group => group.connected).length,
+    unassigned,
+    generatedAt: Date.now(),
+    settings
+  };
+}
+
+function splitTelegramMessage(text, maxLength = 3800) {
+  if (String(text).length <= maxLength) {
+    return [String(text)];
+  }
+
+  const lines = String(text).split('\n');
+  const chunks = [];
+  let current = '';
+
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+    }
+
+    if (line.length <= maxLength) {
+      current = line;
+    } else {
+      for (let index = 0; index < line.length; index += maxLength) {
+        chunks.push(line.slice(index, index + maxLength));
+      }
+      current = '';
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks.length ? chunks : [String(text)];
+}
+
+function teamOverdueMessage(memberName, leads) {
+  const categoryLabels = {
+    not_open: 'Not Open',
+    follow_up: 'Follow-up',
+    not_picking: 'Not Picking Call'
+  };
+
+  const lines = [
+    '⚠️ <b>OVERDUE LEADS - TEAM NOTIFICATION</b>',
+    '',
+    `<b>Assigned To:</b> ${escapeHtml(memberName)}`,
+    `<b>Total overdue:</b> ${leads.length}`,
+    ''
+  ];
+
+  leads.forEach((lead, index) => {
+    lines.push(
+      `<b>${index + 1}. Lead #${escapeHtml(lead.slNo ?? lead.id)}</b>`,
+      `👤 ${escapeHtml(firstNonEmpty(lead.fullName, lead.name, lead.customerName))}`,
+      `📞 ${escapeHtml(firstNonEmpty(lead.phoneNumber, lead.phone, lead.mobile))}`,
+      `🛠 ${escapeHtml(leadService(lead))}`,
+      `📌 ${escapeHtml(categoryLabels[lead.overdueCategory] || lead.status || 'Overdue')}`,
+      `📝 ${escapeHtml(leadNoteOrCallSummary(lead))}`,
+      ''
+    );
+  });
+
+  lines.push('Please update the lead status in the CRM after contacting the customer.');
+
+  if (PUBLIC_BASE_URL) {
+    lines.push('', `<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`);
+  }
+
+  return lines.join('\n');
+}
+
+// ============================================================
 // TELEGRAM MESSAGE HANDLER
 // ============================================================
 
-async function handleTelegramMessage(
-  message
-) {
-
-  if (
-    !message?.text ||
-    !message.chat?.id
-  ) {
+async function handleTelegramMessage(message) {
+  if (!message?.text || !message.chat?.id) {
     return;
   }
 
-  const chatId =
-    String(
-      message.chat.id
-    );
+  const chatId = String(message.chat.id);
+  const text = message.text.trim();
+  const lowerText = text.toLowerCase();
+  const parts = text.split(/\s+/);
+  const command = parts[0].split('@')[0].toLowerCase();
+  const argument = parts.slice(1).join(' ').trim();
 
-  const text =
-    message.text.trim();
-
-  const parts =
-    text.split(/\s+/);
-
-  const command =
-    parts[0]
-      .split('@')[0]
-      .toLowerCase();
-
-  const argument =
-    parts
-      .slice(1)
-      .join(' ')
-      .trim();
-
-
-  // ==========================================================
-  // /START
-  // ==========================================================
-
-  if (
-    command === '/start'
-  ) {
-
-    await telegram(
-      'sendMessage',
-      {
-        chat_id:
-          chatId,
-
-        text:
-          '👋 <b>Welcome to Abra Logistics CRM Bot</b>\n\n' +
-          'Your Telegram Chat ID is:\n\n' +
-          `<code>${escapeHtml(
-            chatId
-          )}</code>\n\n` +
-          'Use /id anytime to see this Chat ID.\n\n' +
-          'Then paste the Chat ID into CRM → Telegram.',
-        
-        parse_mode:
-          'HTML'
-      }
-    );
-
+  if (command === '/start') {
+    await telegram('sendMessage', {
+      chat_id: chatId,
+      text:
+        '👋 <b>Welcome to Abra Logistics CRM Bot</b>\n\n' +
+        'Your Telegram Chat ID is:\n\n' +
+        `<code>${escapeHtml(chatId)}</code>\n\n` +
+        'Use /id anytime to see this Chat ID.\n\n' +
+        'Use /help to see CRM assistant commands.',
+      parse_mode: 'HTML'
+    });
     return;
   }
 
-
-  // ==========================================================
-  // /ID
-  // ==========================================================
-
-  if (
-    command === '/id'
-  ) {
-
-    await telegram(
-      'sendMessage',
-      {
-        chat_id:
-          chatId,
-
-        text:
-          '🆔 <b>Your Telegram Chat ID</b>\n\n' +
-          `<code>${escapeHtml(
-            chatId
-          )}</code>\n\n` +
-          'Copy this number and paste it into:\n' +
-          '<b>CRM → Telegram → Telegram Chat ID</b>',
-
-        parse_mode:
-          'HTML'
-      }
-    );
-
+  if (command === '/id') {
+    await telegram('sendMessage', {
+      chat_id: chatId,
+      text:
+        '🆔 <b>Your Telegram Chat ID</b>\n\n' +
+        `<code>${escapeHtml(chatId)}</code>\n\n` +
+        'Copy this number and paste it into:\n' +
+        '<b>CRM → Telegram → Telegram Chat ID</b>',
+      parse_mode: 'HTML'
+    });
     return;
   }
 
-
-  // ==========================================================
-  // /DISCONNECT
-  // ==========================================================
-
-  if (
-    command === '/disconnect'
-  ) {
-
-    const userSnap =
-      await db
-        .collection('users')
-        .where(
-          'telegramChatId',
-          '==',
-          chatId
-        )
-        .limit(1)
-        .get();
-
+  if (command === '/disconnect') {
+    const userSnap = await db.collection('users')
+      .where('telegramChatId', '==', chatId)
+      .limit(1)
+      .get();
 
     if (userSnap.empty) {
-
-      await telegram(
-        'sendMessage',
-        {
-          chat_id:
-            chatId,
-
-          text:
-            'This Telegram account is not connected to a CRM user.'
-        }
-      );
-
+      await telegram('sendMessage', {
+        chat_id: chatId,
+        text: 'This Telegram account is not connected to a CRM user.'
+      });
       return;
     }
 
+    await userSnap.docs[0].ref.update({
+      telegramChatId: null,
+      telegramConnected: false,
+      telegramUsername: null,
+      telegramFirstName: null,
+      telegramLastName: null,
+      telegramConnectedAt: null,
+      telegramUpdatedAt: FieldValue.serverTimestamp()
+    });
 
-    await userSnap
-      .docs[0]
-      .ref
-      .update({
-
-        telegramChatId:
-          null,
-
-        telegramConnected:
-          false,
-
-        telegramUsername:
-          null,
-
-        telegramFirstName:
-          null,
-
-        telegramLastName:
-          null,
-
-        telegramConnectedAt:
-          null,
-
-        telegramUpdatedAt:
-          FieldValue.serverTimestamp()
-      });
-
-
-    await telegram(
-      'sendMessage',
-      {
-        chat_id:
-          chatId,
-
-        text:
-          '🔌 Telegram notifications have been disconnected from the CRM.'
-      }
-    );
-
+    await telegram('sendMessage', {
+      chat_id: chatId,
+      text: '🔌 Telegram notifications have been disconnected from the CRM.'
+    });
     return;
   }
 
+  const user = await getTelegramCRMUserByChatId(chatId);
 
-  // ==========================================================
-  // /STATUS
-  // ==========================================================
-
-  if (
-    command === '/status'
-  ) {
-
-    const userSnap =
-      await db
-        .collection('users')
-        .where(
-          'telegramChatId',
-          '==',
-          chatId
-        )
-        .limit(1)
-        .get();
-
-
-    await telegram(
-      'sendMessage',
-      {
-        chat_id:
-          chatId,
-
-        text:
-          userSnap.empty
-
-            ? '🔴 This Telegram account is not connected to the CRM.'
-
-            : '🟢 <b>Telegram is connected to your CRM account.</b>',
-
-        parse_mode:
-          'HTML'
-      }
-    );
-
+  if (command === '/status') {
+    await telegram('sendMessage', {
+      chat_id: chatId,
+      text: user
+        ? '🟢 <b>Telegram is connected to your CRM account.</b>'
+        : '🔴 This Telegram account is not connected to the CRM.',
+      parse_mode: 'HTML'
+    });
     return;
   }
 
-
-  // ==========================================================
-  // DEFAULT BOT MESSAGE
-  // ==========================================================
-
-  await telegram(
-    'sendMessage',
-    {
-      chat_id:
-        chatId,
-
+  if (command === '/help' || lowerText === 'help' || lowerText === 'menu') {
+    await telegram('sendMessage', {
+      chat_id: chatId,
       text:
-        '🤖 <b>Abra Logistics CRM Bot</b>\n\n' +
-        'Commands:\n\n' +
-        '/start - Start the bot\n' +
+        '🤖 <b>Abra Logistics CRM Assistant</b>\n\n' +
+        '<b>Connection</b>\n' +
         '/id - Show your Telegram Chat ID\n' +
         '/status - Check CRM connection\n' +
         '/disconnect - Disconnect Telegram\n\n' +
-        'Use the Chat ID from /id in the CRM Telegram page.',
+        '<b>Management reports</b>\n' +
+        "/today - Today's lead report\n" +
+        "/yesterday - Yesterday's lead report\n" +
+        '/report YYYY-MM-DD - Report for a date\n' +
+        "/classifications - Today's classifications\n" +
+        "/campaigns - Today's campaign summary\n\n" +
+        'You can also type: <i>today report</i>, <i>yesterday report</i>, <i>how many leads</i>, or <i>show classifications</i>.',
+      parse_mode: 'HTML'
+    });
+    return;
+  }
 
-      parse_mode:
-        'HTML'
+  const wantsToday = command === '/today' || lowerText === 'today report' || lowerText === 'today';
+  const wantsYesterday = command === '/yesterday' || lowerText === 'yesterday report' || lowerText === 'yesterday';
+  const wantsReport = command === '/report' || lowerText === 'report' || lowerText.startsWith('report ');
+  const wantsClassifications = command === '/classifications' || lowerText.includes('classification') || lowerText.includes('how many leads') || lowerText.includes('how many lead');
+  const wantsCampaigns = command === '/campaigns' || lowerText.includes('active campaigns') || lowerText.includes('campaign report') || lowerText === 'campaigns';
+
+  if (wantsToday || wantsYesterday || wantsReport || wantsClassifications || wantsCampaigns) {
+    if (!user) {
+      await telegram('sendMessage', {
+        chat_id: chatId,
+        text: '🔐 Connect this Telegram account to a CRM user before using CRM reports. Use the CRM → Telegram page to connect your Chat ID.'
+      });
+      return;
     }
-  );
-}
 
+    if (!isAdminOrSuperAdmin(user)) {
+      await telegram('sendMessage', {
+        chat_id: chatId,
+        text: '🔐 Management reports are available only to Admin and Super Admin Telegram accounts.'
+      });
+      return;
+    }
+
+    const settings = await getCRMSettings();
+    const timezone = settings.timezone || 'Asia/Kolkata';
+    let dateKey = localDateKey(new Date(), timezone);
+
+    if (wantsYesterday) {
+      dateKey = localDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000), timezone);
+    } else if (wantsReport && command === '/report') {
+      dateKey = parseTelegramReportDate(argument, timezone);
+      if (!dateKey) {
+        await telegram('sendMessage', {
+          chat_id: chatId,
+          text: 'Use /report YYYY-MM-DD, for example: /report 2026-08-25'
+        });
+        return;
+      }
+    } else if (wantsReport && lowerText.startsWith('report ')) {
+      dateKey = parseTelegramReportDate(lowerText.slice(7), timezone);
+      if (!dateKey) {
+        await telegram('sendMessage', {
+          chat_id: chatId,
+          text: 'Use report YYYY-MM-DD, for example: report 2026-08-25'
+        });
+        return;
+      }
+    }
+
+    if (wantsCampaigns) {
+      const campaigns = await buildTelegramCampaignReport(dateKey, timezone);
+      await telegram('sendMessage', {
+        chat_id: chatId,
+        text: telegramCampaignReportMessage(campaigns, dateKey),
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+      return;
+    }
+
+    const report = await buildDailyReport(dateKey, timezone);
+    const title = wantsYesterday ? 'YESTERDAY LEAD REPORT' : 'LEAD REPORT';
+
+    await telegram('sendMessage', {
+      chat_id: chatId,
+      text: telegramReportMessage(report, dateKey, title),
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
+    return;
+  }
+
+  await telegram('sendMessage', {
+    chat_id: chatId,
+    text:
+      '🤖 I can help with CRM reports.\n\n' +
+      'Try <b>/help</b>, <b>today report</b>, <b>yesterday report</b>, <b>how many leads</b>, or <b>campaign report</b>.',
+    parse_mode: 'HTML'
+  });
+}
 
 // ============================================================
 // TELEGRAM WEBHOOK
@@ -2751,6 +3043,15 @@ app.get(
 
         username:
           user.telegramUsername ||
+          null,
+
+        role:
+          user.role ||
+          null,
+
+        name:
+          user.name ||
+          user.email ||
           null,
 
         botUsername:
@@ -3160,6 +3461,198 @@ app.post(
   }
 );
 
+
+// ============================================================
+// TELEGRAM TEAM OVERDUE API
+// ============================================================
+
+app.get(
+  '/api/telegram/team-overdue',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      if (!isAdminOrSuperAdmin(req.crmUser)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Only Admin and Super Admin users can view team overdue leads.'
+        });
+      }
+
+      const data = await getTeamOverdueLeads();
+
+      res.json({
+        ok: true,
+        total: data.total,
+        connectedGroups: data.connectedGroups,
+        unassigned: data.unassigned,
+        generatedAt: data.generatedAt,
+        groups: data.groups.map(group => ({
+          memberId: group.memberId,
+          memberName: group.memberName,
+          connected: group.connected,
+          count: group.leads.length,
+          leads: group.leads.map(lead => ({
+            id: lead.id,
+            slNo: lead.slNo ?? lead.id,
+            fullName: firstNonEmpty(lead.fullName, lead.name, lead.customerName),
+            phone: firstNonEmpty(lead.phoneNumber, lead.phone, lead.mobile),
+            service: leadService(lead),
+            status: firstNonEmpty(lead.status, '—'),
+            category: lead.overdueCategory,
+            dueAt: lead.overdueAt,
+            note: leadNoteOrCallSummary(lead)
+          }))
+        }))
+      });
+    } catch (error) {
+      console.error('Telegram team overdue preview error:', error.message);
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  }
+);
+
+app.post(
+  '/api/telegram/notify-team-overdue',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      if (!isAdminOrSuperAdmin(req.crmUser)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Only Admin and Super Admin users can notify the team.'
+        });
+      }
+
+      const data = await getTeamOverdueLeads();
+      const recipients = data.groups.filter(group => group.connected && group.leads.length);
+
+      if (!recipients.length) {
+        return res.json({
+          ok: true,
+          sent: false,
+          sentCount: 0,
+          totalOverdue: data.total,
+          message: data.total
+            ? 'No overdue leads have a connected Telegram recipient.'
+            : 'There are no overdue leads to notify.'
+        });
+      }
+
+      const notificationRef = db.collection('telegramTeamNotifications').doc();
+      const notificationId = notificationRef.id;
+      const sentRecipients = [];
+      const failedRecipients = [];
+
+      for (const group of recipients) {
+        try {
+          const messageChunks = splitTelegramMessage(
+            teamOverdueMessage(group.memberName, group.leads)
+          );
+          let sentAll = true;
+          let lastReason = 'send-failed';
+
+          for (const chunk of messageChunks) {
+            const result = await sendToMember(
+              group.memberId,
+              chunk
+            );
+
+            if (!result.sent) {
+              sentAll = false;
+              lastReason = result.reason || lastReason;
+              break;
+            }
+          }
+
+          if (sentAll) {
+            sentRecipients.push({
+              memberId: group.memberId,
+              memberName: group.memberName,
+              leadCount: group.leads.length
+            });
+          } else {
+            failedRecipients.push({
+              memberId: group.memberId,
+              memberName: group.memberName,
+              leadCount: group.leads.length,
+              reason: lastReason
+            });
+          }
+        } catch (error) {
+          failedRecipients.push({
+            memberId: group.memberId,
+            memberName: group.memberName,
+            leadCount: group.leads.length,
+            reason: error.message
+          });
+        }
+      }
+
+      await notificationRef.set({
+        createdAt: FieldValue.serverTimestamp(),
+        sentBy: req.firebaseUser.uid,
+        sentByName: firstNonEmpty(req.crmUser.name, req.crmUser.email, req.firebaseUser.uid),
+        totalOverdue: data.total,
+        sentCount: sentRecipients.length,
+        sentLeadCount: sentRecipients.reduce((sum, item) => sum + item.leadCount, 0),
+        failedCount: failedRecipients.length,
+        recipients: sentRecipients,
+        failedRecipients,
+        unassigned: data.unassigned
+      });
+
+      res.json({
+        ok: true,
+        sent: sentRecipients.length > 0,
+        notificationId,
+        sentCount: sentRecipients.length,
+        sentLeadCount: sentRecipients.reduce((sum, item) => sum + item.leadCount, 0),
+        failedCount: failedRecipients.length,
+        totalOverdue: data.total,
+        unassigned: data.unassigned,
+        recipients: sentRecipients,
+        failedRecipients
+      });
+    } catch (error) {
+      console.error('Telegram team overdue notification error:', error.message);
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  }
+);
+
+app.get(
+  '/api/telegram/team-notification-history',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      if (!isAdminOrSuperAdmin(req.crmUser)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Only Admin and Super Admin users can view Telegram team notification history.'
+        });
+      }
+
+      const limit = Math.min(Math.max(Number(req.query.limit || 10), 1), 50);
+      const snapshot = await db
+        .collection('telegramTeamNotifications')
+        .orderBy('createdAt', 'desc')
+        .limit(limit)
+        .get();
+
+      res.json({
+        ok: true,
+        history: snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: timestampMs(doc.data().createdAt)
+        }))
+      });
+    } catch (error) {
+      console.error('Telegram team notification history error:', error.message);
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  }
+);
 
 // ============================================================
 // SERVE CRM FRONTEND
