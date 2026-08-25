@@ -38,6 +38,10 @@ const REMINDER_SCAN_MS =
 const USER_CACHE_TTL_MS = Number(process.env.CRM_USER_CACHE_TTL_MS || 60000);
 const SETTINGS_CACHE_TTL_MS = Number(process.env.CRM_SETTINGS_CACHE_TTL_MS || 30000);
 const REPORT_CACHE_TTL_MS = Number(process.env.TELEGRAM_REPORT_CACHE_TTL_MS || 60000);
+const LEAD_CHANGE_LOOKBACK_MS = Number(process.env.TELEGRAM_LEAD_CHANGE_LOOKBACK_MS || 120000);
+const MAX_LEAD_CHANGE_SCAN_DOCS = Number(process.env.TELEGRAM_MAX_LEAD_CHANGE_SCAN_DOCS || 1000);
+const MAX_OVERDUE_SCAN_DOCS = Number(process.env.TELEGRAM_MAX_OVERDUE_SCAN_DOCS || 1000);
+const MAX_CONNECTED_TELEGRAM_USERS = Number(process.env.TELEGRAM_MAX_CONNECTED_USERS || 200);
 
 const userCache = new Map();
 let crmSettingsCache = null;
@@ -257,6 +261,17 @@ const FieldValue =
 
 
 // ============================================================
+// FIRESTORE ERROR HELPERS
+// ============================================================
+function isQuotaError(error) {
+  const code = error?.code;
+  return code === 8 ||
+    code === 'resource-exhausted' ||
+    String(error?.message || '').toLowerCase().includes('quota exceeded');
+}
+
+
+// ============================================================
 // CORS
 // ============================================================
 
@@ -311,34 +326,68 @@ app.use(
 // TELEGRAM API HELPER
 // ============================================================
 
-async function telegram(
-  method,
-  body = {}
-) {
-  const response = await fetch(
-    `https://api.telegram.org/bot${BOT_TOKEN}/${method}`,
-    {
-      method: 'POST',
+async function telegram(method, body = {}) {
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
+  const maxAttempts = 2;
 
-      headers: {
-        'Content-Type': 'application/json'
-      },
-
-      body: JSON.stringify(body)
-    }
-  );
-
-  const data =
-    await response.json();
-
-  if (!data.ok) {
-    throw new Error(
-      data.description ||
-      `Telegram API error: ${method}`
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Number(process.env.TELEGRAM_API_TIMEOUT_MS || 15000)
     );
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (data.ok) {
+        return data.result;
+      }
+
+      // Telegram can explicitly ask clients to wait after rate limiting.
+      // Honor that value once rather than hammering the API.
+      if (response.status === 429 && attempt < maxAttempts) {
+        const retryAfter = Math.min(30, Number(data?.parameters?.retry_after || 2));
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        continue;
+      }
+
+      throw new Error(
+        data.description ||
+        `Telegram API error: ${method}`
+      );
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(`Telegram API timeout: ${method}`);
+      }
+
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+
+      // Retry transient network failures once. Application errors are thrown
+      // immediately above and are not retried.
+      if (!error?.message || !String(error.message).startsWith('Telegram API error:')) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  return data.result;
+  throw new Error(`Telegram API request failed: ${method}`);
 }
 
 
@@ -954,22 +1003,33 @@ let managementTelegramUsersCache = null;
 let managementTelegramUsersCacheAt = 0;
 
 async function getManagementTelegramUsers() {
-  if (managementTelegramUsersCache && Date.now() - managementTelegramUsersCacheAt < USER_CACHE_TTL_MS) {
+  if (
+    managementTelegramUsersCache &&
+    Date.now() - managementTelegramUsersCacheAt < USER_CACHE_TTL_MS
+  ) {
     return managementTelegramUsersCache;
   }
 
-  const snapshot = await db.collection('users').get();
+  // Never scan the entire users collection. Only users that have explicitly
+  // connected Telegram are relevant to management notifications.
+  const snapshot = await db
+    .collection('users')
+    .where('telegramConnected', '==', true)
+    .limit(MAX_CONNECTED_TELEGRAM_USERS)
+    .get();
+
   managementTelegramUsersCache = snapshot.docs
     .map(doc => ({ id: doc.id, ...doc.data() }))
     .filter(user =>
       user.active !== false &&
       isAdminOrSuperAdmin(user) &&
-      user.telegramConnected === true &&
       !!user.telegramChatId
     );
+
   managementTelegramUsersCacheAt = Date.now();
   return managementTelegramUsersCache;
 }
+
 
 
 // ============================================================
@@ -1287,143 +1347,126 @@ async function notifyManagementStatusChange(
 
 
 // ============================================================
-// REAL-TIME STATUS CHANGE DETECTOR
+// TARGETED LEAD CHANGE DETECTOR
 // ============================================================
-// Firestore listener for lead status changes.
-// This catches Interested / Not Interested transitions from ANY
-// previous status (Not Open, Contacted, Busy, Not Picking Call,
-// Call Back Later, etc.) without waiting for the polling cycle.
-// The existing polling detector remains as a safety fallback.
+// Production-safe replacement for the old full-collection Firestore listener.
+// It reads only recently updated leads and uses idempotent delivery claims.
+// A full leads onSnapshot listener is intentionally NOT used because the
+// initial snapshot alone can read the entire collection and exhaust quota.
 
-const liveLeadStatusCache = new Map();
-let leadStatusListenerStarted = false;
-let leadStatusListenerHealthy = false;
-let realtimeInitialSnapshotComplete = false;
-let lastStatusFallbackScanAt = 0;
-const STATUS_FALLBACK_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const LEAD_CHANGE_CURSOR_DOC = 'lead-change-cursor-v2';
+let leadChangeCursorAt = null;
+let leadChangeCursorInitialized = false;
+let leadChangeScanRunning = false;
 
-function statusEventKey(lead, status) {
-  const eventAt = timestampMs(
-    lead?.statusUpdatedAt ||
-    lead?.updatedAt ||
-    lead?.modifiedAt
-  ) || Date.now();
+async function initializeLeadChangeCursor() {
+  if (leadChangeCursorInitialized) return;
 
-  return `${lead?.id || 'unknown'}_${String(status || '').trim().toLowerCase()}_${eventAt}`
-    .replace(/[^a-zA-Z0-9_-]/g, '_');
-}
+  const ref = db.collection('telegramSystem').doc(LEAD_CHANGE_CURSOR_DOC);
+  try {
+    const snap = await ref.get();
+    const saved = snap.exists ? timestampMs(snap.data().lastProcessedAt) : null;
 
-async function handleRealtimeLeadStatusChange(lead, previousStatus) {
-  const current = normalizedStatus(lead);
+    // On a fresh installation, start from now. This prevents a production
+    // deploy from reading the entire leads collection and sending historical
+    // Telegram alerts for old records.
+    leadChangeCursorAt = saved || Date.now();
+    leadChangeCursorInitialized = true;
 
-  if (
-    current !== 'interested' &&
-    current !== 'not interested'
-  ) {
-    return;
-  }
-
-  // Ignore a status that did not actually change.
-  if (
-    previousStatus &&
-    String(previousStatus).trim().toLowerCase() === current
-  ) {
-    return;
-  }
-
-  console.log(
-    `🔔 Realtime status change: ${lead.id} | ${previousStatus || '—'} -> ${leadStatus(lead)}`
-  );
-
-  await notifyManagementStatusChange(
-    lead,
-    previousStatus || '—'
-  );
-}
-
-function startLeadStatusRealtimeListener() {
-  if (leadStatusListenerStarted) return;
-
-  leadStatusListenerStarted = true;
-  console.log('👂 Starting realtime Firestore lead status + assignment listener...');
-
-  db.collection('leads').onSnapshot(
-    snapshot => {
-      leadStatusListenerHealthy = true;
-      const tasks = [];
-      const isInitialSnapshot = !realtimeInitialSnapshotComplete;
-
-      snapshot.docChanges().forEach(change => {
-        const lead = { id: change.doc.id, ...change.doc.data() };
-        const currentStatus = leadStatus(lead);
-        const currentAssignment = lead.assignedTo || null;
-        const cached = liveLeadStatusCache.get(lead.id);
-
-        if (change.type === 'removed') {
-          liveLeadStatusCache.delete(lead.id);
-          return;
-        }
-
-        if (isInitialSnapshot && change.type === 'added' && !cached) {
-          liveLeadStatusCache.set(lead.id, {
-            status: currentStatus,
-            assignedTo: currentAssignment
-          });
-          return;
-        }
-
-        const previousStatus = cached?.status;
-        const previousAssignment = cached?.assignedTo || null;
-
-        liveLeadStatusCache.set(lead.id, {
-          status: currentStatus,
-          assignedTo: currentAssignment
-        });
-
-        if (
-          previousStatus !== undefined &&
-          String(previousStatus).trim().toLowerCase() !== String(currentStatus).trim().toLowerCase()
-        ) {
-          tasks.push(
-            handleRealtimeLeadStatusChange(lead, previousStatus).catch(error => {
-              console.error(`Realtime status notification failed for ${lead.id}:`, error.message);
-            })
-          );
-        }
-
-        const assignmentChanged =
-          previousAssignment !== currentAssignment &&
-          !!currentAssignment &&
-          lead.assignmentStatus === 'assigned';
-
-        if (!isInitialSnapshot && assignmentChanged) {
-          tasks.push(
-            notifyAssignment(lead).catch(error => {
-              console.error(`Realtime assignment notification failed for ${lead.id}:`, error.message);
-            })
-          );
-        }
-      });
-
-      realtimeInitialSnapshotComplete = true;
-      if (tasks.length) Promise.allSettled(tasks).catch(() => {});
-    },
-    error => {
-      leadStatusListenerHealthy = false;
-      console.error('❌ Firestore realtime lead status listener error:', error.message);
+    if (!saved) {
+      await ref.set({
+        lastProcessedAt: admin.firestore.Timestamp.fromMillis(leadChangeCursorAt),
+        initializedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
     }
-  );
+  } catch (error) {
+    console.error('❌ Could not initialize Telegram lead-change cursor:', error.message);
+    // Keep the service alive. A transient Firestore problem must not crash the
+    // Node process or trigger a Render restart loop.
+    leadChangeCursorAt = Date.now();
+    leadChangeCursorInitialized = true;
+  }
 }
-
-// ============================================================
-// STATUS CHANGE DETECTOR - POLLING FALLBACK
-// ============================================================
 
 async function processStatusChanges() {
-  // Realtime Firestore listener handles status changes immediately.
-  // Do not download the entire leads collection as a one-minute fallback.
-  return;
+  if (leadChangeScanRunning) return;
+  leadChangeScanRunning = true;
+
+  try {
+    await initializeLeadChangeCursor();
+
+    const now = Date.now();
+    const fromMs = Math.max(0, (leadChangeCursorAt || now) - LEAD_CHANGE_LOOKBACK_MS);
+    const from = admin.firestore.Timestamp.fromMillis(fromMs);
+
+    const query = db
+      .collection('leads')
+      .where('updatedAt', '>', from)
+      .orderBy('updatedAt', 'asc')
+      .limit(MAX_LEAD_CHANGE_SCAN_DOCS);
+
+    const snapshot = await query.get();
+    let newestProcessedAt = leadChangeCursorAt || fromMs;
+    const tasks = [];
+
+    for (const change of snapshot.docs) {
+      const lead = { id: change.id, ...change.data() };
+      const updatedAt = timestampMs(lead.updatedAt || lead.statusUpdatedAt || lead.assignedAt);
+      if (updatedAt) newestProcessedAt = Math.max(newestProcessedAt, updatedAt);
+
+      // Assignment notifications are driven by the lead's recent update. The
+      // deterministic delivery ID makes this idempotent across restarts.
+      if (lead.assignmentStatus === 'assigned' && lead.assignedTo) {
+        const assignedAt = timestampMs(lead.assignedAt) || updatedAt;
+        if (assignedAt && assignedAt >= fromMs) {
+          tasks.push(
+            notifyAssignment(lead).catch(error =>
+              console.error(`Recent assignment notification failed for ${lead.id}:`, error.message)
+            )
+          );
+        }
+      }
+
+        const status = normalizedStatus(lead);
+      // Only use statusUpdatedAt for status notifications. Falling back to
+      // updatedAt would resend an Interested/Not Interested alert whenever a
+      // note, phone number, or unrelated field is edited.
+      const statusAt = timestampMs(lead.statusUpdatedAt);
+      if (
+        (status === 'interested' || status === 'not interested') &&
+        statusAt &&
+        statusAt >= fromMs
+      ) {
+        tasks.push(
+          notifyManagementStatusChange(lead, lead.previousStatus || '—').catch(error =>
+            console.error(`Recent status notification failed for ${lead.id}:`, error.message)
+          )
+        );
+      }
+    }
+
+    if (tasks.length) await Promise.allSettled(tasks);
+
+    // Only advance the cursor after the page has been processed. Delivery
+    // claims protect against duplicates if the process dies between sends.
+    if (newestProcessedAt > (leadChangeCursorAt || 0)) {
+      leadChangeCursorAt = newestProcessedAt;
+      await db.collection('telegramSystem').doc(LEAD_CHANGE_CURSOR_DOC).set({
+        lastProcessedAt: admin.firestore.Timestamp.fromMillis(newestProcessedAt),
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+  } catch (error) {
+    if (isQuotaError(error)) {
+      console.error('⚠️ Telegram lead-change scan skipped: Firestore quota is exhausted.');
+    } else {
+      console.error('❌ Telegram lead-change scan error:', error.message);
+    }
+  } finally {
+    leadChangeScanRunning = false;
+  }
 }
+
 
 // ============================================================
 // MANAGEMENT OVERDUE MESSAGE
@@ -1471,6 +1514,59 @@ function managementOverdueMessage(lead, category) {
 
 
 // ============================================================
+// TARGETED OVERDUE QUERY
+// ============================================================
+async function getPotentialOverdueLeads(now = Date.now()) {
+  const dueSnapshot = await db
+    .collection('leads')
+    .where('dueTime', '<=', admin.firestore.Timestamp.fromMillis(now))
+    .orderBy('dueTime', 'asc')
+    .limit(MAX_OVERDUE_SCAN_DOCS)
+    .get();
+
+  const leadsById = new Map(
+    dueSnapshot.docs.map(doc => [
+      doc.id,
+      { id: doc.id, ...doc.data() }
+    ])
+  );
+
+  // Preserve the legacy reminder-after-assignment behavior without scanning
+  // the whole leads collection. This query may require a Firestore composite
+  // index on status + assignedAt. If the index is not present, the normal
+  // dueTime-based path continues to work and the missing-index error is logged.
+  const reminderMinutes = Number((await getCRMSettings()).reminderAfterMinutes || 30);
+  const legacyCutoff = now - reminderMinutes * 60 * 1000;
+
+  try {
+    const legacySnapshot = await db
+      .collection('leads')
+      .where('status', 'in', ['Not Open', 'Not Opened', 'New'])
+      .where('assignedAt', '<=', admin.firestore.Timestamp.fromMillis(legacyCutoff))
+      .limit(MAX_OVERDUE_SCAN_DOCS)
+      .get();
+
+    for (const doc of legacySnapshot.docs) {
+      if (!leadsById.has(doc.id)) {
+        leadsById.set(doc.id, { id: doc.id, ...doc.data() });
+      }
+    }
+  } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('⚠️ Legacy overdue query skipped because Firestore quota is exhausted.');
+    } else {
+      console.warn('⚠️ Legacy overdue query skipped:', error.message);
+    }
+  }
+
+  if (dueSnapshot.size >= MAX_OVERDUE_SCAN_DOCS) {
+    console.warn(`⚠️ Overdue dueTime query reached safety limit (${MAX_OVERDUE_SCAN_DOCS}).`);
+  }
+
+  return Array.from(leadsById.values());
+}
+
+// ============================================================
 // MANAGEMENT OVERDUE SCAN
 // ============================================================
 
@@ -1493,23 +1589,9 @@ async function scanManagementOverdues() {
     return;
   }
 
-  const overdueStatuses = [
-    'Not Open', 'Not Opened', 'New',
-    'Call Back Later', 'Callback Later',
-    'Follow Up', 'Follow-Up', 'Followup',
-    'Not Picking Call', 'Not Picking'
-  ];
+  const leads = await getPotentialOverdueLeads(now);
 
-  const snapshot = await db
-    .collection('leads')
-    .where('status', 'in', overdueStatuses)
-    .get();
-
-  for (const doc of snapshot.docs) {
-    const lead = {
-      id: doc.id,
-      ...doc.data()
-    };
+  for (const lead of leads) {
 
     const status = normalizedStatus(lead);
     let due = leadDueTimeMs(lead);
@@ -1665,9 +1747,8 @@ async function buildDailyReport(dateKey, timezone) {
       .where('createdAt', '<', admin.firestore.Timestamp.fromDate(end))
       .get();
   } catch (error) {
-    if (error.code === 8 || error.code === 'resource-exhausted') throw error;
-    console.warn('Daily report date query failed; using fallback scan:', error.message);
-    snapshot = await db.collection('leads').get();
+    console.error('Daily report query failed:', error.message);
+    throw error;
   }
 
   const report = {
@@ -2046,20 +2127,9 @@ async function scanOverdueLeads() {
     return;
   }
 
-  const snapshot = await db
-    .collection('leads')
-    .where('status', 'in', ['Not Open', 'Not Opened', 'New'])
-    .get();
+  const leads = await getPotentialOverdueLeads(now);
 
-
-  for (
-    const doc of snapshot.docs
-  ) {
-
-    const lead = {
-      id: doc.id,
-      ...doc.data()
-    };
+  for (const lead of leads) {
 
     if (
       !lead.assignedTo ||
@@ -2199,136 +2269,13 @@ async function scanOverdueLeads() {
 // INITIALIZE DELIVERY BASELINE
 // ============================================================
 
-async function initializeAssignmentDeliveryBaseline() {
-
-  const markerRef =
-    db
-      .collection(
-        'telegramSystem'
-      )
-      .doc(
-        'assignment-baseline'
-      );
-
-  const markerSnap =
-    await markerRef.get();
-
-  if (markerSnap.exists) {
-    return;
-  }
-
-  const snapshot =
-    await db
-      .collection('leads')
-      .where(
-        'assignmentStatus',
-        '==',
-        'assigned'
-      )
-      .get();
-
-  const batch =
-    db.batch();
-
-  let count = 0;
-
-
-  snapshot.docs.forEach(
-    doc => {
-
-      const lead =
-        doc.data();
-
-      const assignedAt =
-        timestampMs(
-          lead.assignedAt
-        ) ||
-        timestampMs(
-          lead.createdAt
-        );
-
-      if (!assignedAt) {
-        return;
-      }
-
-      const deliveryId =
-        `new_${doc.id}_${assignedAt}`
-          .replace(
-            /[^a-zA-Z0-9_-]/g,
-            '_'
-          );
-
-      batch.set(
-        db
-          .collection(
-            'telegramDeliveries'
-          )
-          .doc(deliveryId),
-
-        {
-          type:
-            'newLeadBaseline',
-
-          leadId:
-            doc.id,
-
-          memberId:
-            lead.assignedTo ||
-            null,
-
-          assignmentAt:
-            assignedAt,
-
-          baseline:
-            true,
-
-          createdAt:
-            FieldValue.serverTimestamp()
-        },
-
-        {
-          merge: true
-        }
-      );
-
-      count += 1;
-    }
-  );
-
-
-  if (count) {
-    await batch.commit();
-  }
-
-
-  await markerRef.set(
-    {
-      initializedAt:
-        FieldValue.serverTimestamp(),
-
-      seeded:
-        count
-    },
-
-    {
-      merge: true
-    }
-  );
-
-
-  console.log(
-    `🧱 Telegram assignment baseline initialized for ${count} existing assignments.`
-  );
-}
-
-
 // ============================================================
 // PROCESS NEW ASSIGNMENTS
 // ============================================================
 
 async function processNewAssignments() {
-  // Assignment notifications are handled by the realtime lead listener.
-  // Avoid a full assigned-leads query every minute.
+  // Recent assignment changes are handled by processStatusChanges(), which
+  // queries only documents updated since the persisted cursor.
   return;
 }
 
@@ -2361,10 +2308,14 @@ async function runNotificationCycle() {
 
   } catch (error) {
 
-    console.error(
-      'Telegram notification cycle error:',
-      error.message
-    );
+    if (isQuotaError(error)) {
+      console.error('⚠️ Telegram notification cycle paused: Firestore quota exhausted.');
+    } else {
+      console.error(
+        'Telegram notification cycle error:',
+        error.message
+      );
+    }
 
   } finally {
 
@@ -2500,9 +2451,8 @@ async function buildTelegramCampaignReport(dateKey, timezone = 'Asia/Kolkata') {
       .where('createdAt', '<', admin.firestore.Timestamp.fromDate(end))
       .get();
   } catch (error) {
-    if (error.code === 8 || error.code === 'resource-exhausted') throw error;
-    console.warn('Campaign report date query failed; using fallback scan:', error.message);
-    snapshot = await db.collection('leads').get();
+    console.error('Campaign report query failed:', error.message);
+    throw error;
   }
   const campaigns = new Map();
 
@@ -2538,8 +2488,7 @@ async function buildTelegramCampaignReport(dateKey, timezone = 'Asia/Kolkata') {
     return 'Unspecified campaign';
   };
 
-  for (const doc of snapshot.docs) {
-    const lead = { id: doc.id, ...doc.data() };
+  for (const lead of leads) {
     const created = timestampMs(lead.createdAt);
     if (!created || localDateKey(new Date(created), timezone) !== dateKey) {
       continue;
@@ -2599,16 +2548,7 @@ function telegramCampaignReportMessage(campaigns, dateKey) {
 async function getTeamOverdueLeads() {
   const settings = await getCRMSettings();
   const now = Date.now();
-  const overdueStatuses = [
-    'Not Open', 'Not Opened', 'New',
-    'Call Back Later', 'Callback Later',
-    'Follow Up', 'Follow-Up', 'Followup',
-    'Not Picking Call', 'Not Picking'
-  ];
-  const snapshot = await db
-    .collection('leads')
-    .where('status', 'in', overdueStatuses)
-    .get();
+  const leads = await getPotentialOverdueLeads(now);
   const groups = new Map();
   const memberCache = new Map();
   let unassigned = 0;
@@ -2994,6 +2934,22 @@ app.post(
 
 
 // ============================================================
+// TELEGRAM BOT INFO CACHE
+// ============================================================
+let telegramBotInfoCache = null;
+let telegramBotInfoCacheAt = 0;
+const TELEGRAM_BOT_INFO_CACHE_TTL_MS = 60000;
+
+async function getTelegramBotInfo() {
+  if (telegramBotInfoCache && Date.now() - telegramBotInfoCacheAt < TELEGRAM_BOT_INFO_CACHE_TTL_MS) {
+    return telegramBotInfoCache;
+  }
+  telegramBotInfoCache = await telegram('getMe');
+  telegramBotInfoCacheAt = Date.now();
+  return telegramBotInfoCache;
+}
+
+// ============================================================
 // HEALTH CHECK
 // ============================================================
 
@@ -3004,7 +2960,7 @@ app.get(
     try {
 
       const bot =
-        await telegram('getMe');
+        await getTelegramBotInfo();
 
       res.json({
         ok: true,
@@ -3054,7 +3010,7 @@ app.get(
         req.crmUser;
 
       const bot =
-        await telegram('getMe');
+        await getTelegramBotInfo();
 
 
       const connected =
@@ -4053,15 +4009,10 @@ app.listen(
     await configureTelegramWebhook();
 
 
-    await initializeAssignmentDeliveryBaseline();
 
 
-    // Start realtime status notifications before the first polling cycle.
-    // This makes Interested / Not Interested alerts independent of the
-    // reminder scan interval.
-    startLeadStatusRealtimeListener();
-
-
+    // Notification processing is cursor-based and reads only recently updated
+    // leads. No full-collection realtime listener is opened at startup.
     await runNotificationCycle();
 
 
