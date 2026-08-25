@@ -1,5 +1,5 @@
 // ============================================================
-// TELEGRAM.JS — Manual Telegram Chat ID connection UI
+// TELEGRAM.JS — Manual Telegram Chat ID connection + CRM tools UI
 // ============================================================
 
 (function () {
@@ -115,6 +115,43 @@
       <div id="telegramConnectResult" class="mt-3"></div>`;
   }
 
+  function managementMarkup() {
+    return `
+      <div class="mt-4 pt-4 border-top" id="telegramManagementArea">
+        <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+          <div>
+            <h5 class="mb-1"><i class="bi bi-people me-2"></i>Team Overdue Leads</h5>
+            <p class="text-muted mb-0 small">Review overdue leads grouped by the assigned team member, then notify connected members.</p>
+          </div>
+          <span class="badge text-bg-dark">Admin</span>
+        </div>
+
+        <div id="telegramOverdueSummary" class="mb-3">
+          <div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Checking overdue leads…</div>
+        </div>
+
+        <div id="telegramOverdueGroups" class="mb-3"></div>
+
+        <div class="d-flex gap-2 flex-wrap mb-4">
+          <button id="telegramNotifyTeamButton" class="btn btn-warning" onclick="notifyTelegramTeamOverdue()" disabled>
+            <i class="bi bi-bell me-1"></i>Notify Team
+          </button>
+          <button class="btn btn-outline-secondary" onclick="loadTelegramTeamOverdue()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+          </button>
+        </div>
+
+        <div class="border rounded-3 overflow-hidden">
+          <div class="p-3 bg-light border-bottom">
+            <strong><i class="bi bi-clock-history me-2"></i>Notification History</strong>
+          </div>
+          <div id="telegramNotificationHistory" class="table-responsive">
+            <div class="p-3 text-muted small">Loading history…</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
   async function refreshTelegramStatus() {
     const status = document.getElementById('telegramConnectionStatus');
     const action = document.getElementById('telegramActionArea');
@@ -127,7 +164,14 @@
       const data = await telegramApi('/api/telegram/status');
       if (data.connected) {
         status.innerHTML = connectedMarkup(data);
-        action.innerHTML = '';
+        action.innerHTML = isAdminRole(data.role) ? managementMarkup() : '';
+
+        if (isAdminRole(data.role)) {
+          await Promise.allSettled([
+            loadTelegramTeamOverdue(),
+            loadTelegramNotificationHistory()
+          ]);
+        }
       } else {
         status.innerHTML = `
           <div class="alert alert-secondary mb-3">
@@ -187,6 +231,202 @@
     }
   }
 
+  async function loadTelegramTeamOverdue() {
+    const summary = document.getElementById('telegramOverdueSummary');
+    const groupsWrap = document.getElementById('telegramOverdueGroups');
+    const button = document.getElementById('telegramNotifyTeamButton');
+    if (!summary || !groupsWrap) return;
+
+    summary.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Checking overdue leads…</div>';
+    groupsWrap.innerHTML = '';
+    if (button) button.disabled = true;
+
+    try {
+      const data = await telegramApi('/api/telegram/team-overdue');
+
+      const connectedGroups = Number(data.connectedGroups || 0);
+      const total = Number(data.total || 0);
+      const unassigned = Number(data.unassigned || 0);
+
+      summary.innerHTML = `
+        <div class="row g-2">
+          <div class="col-6 col-md-3">
+            <div class="border rounded-3 p-3 bg-light h-100">
+              <div class="text-muted small">Overdue Leads</div>
+              <div class="fs-4 fw-bold">${total}</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="border rounded-3 p-3 bg-light h-100">
+              <div class="text-muted small">Team Members</div>
+              <div class="fs-4 fw-bold">${data.groups?.length || 0}</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="border rounded-3 p-3 bg-light h-100">
+              <div class="text-muted small">Telegram Ready</div>
+              <div class="fs-4 fw-bold">${connectedGroups}</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="border rounded-3 p-3 bg-light h-100">
+              <div class="text-muted small">Unassigned</div>
+              <div class="fs-4 fw-bold">${unassigned}</div>
+            </div>
+          </div>
+        </div>`;
+
+      if (!data.groups?.length) {
+        groupsWrap.innerHTML = '<div class="alert alert-success mb-0">No overdue leads currently require team attention.</div>';
+      } else {
+        groupsWrap.innerHTML = data.groups.map(group => `
+          <div class="border rounded-3 mb-2 overflow-hidden">
+            <div class="d-flex align-items-center justify-content-between gap-2 p-3 bg-light">
+              <div>
+                <strong>${escapeHtml(group.memberName)}</strong>
+                <span class="badge ${group.connected ? 'text-bg-success' : 'text-bg-secondary'} ms-2">${group.connected ? 'Telegram connected' : 'Telegram not connected'}</span>
+              </div>
+              <span class="badge text-bg-warning">${group.count} overdue</span>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm mb-0 align-middle">
+                <thead>
+                  <tr>
+                    <th>Lead</th>
+                    <th>Customer</th>
+                    <th>Phone</th>
+                    <th>Service</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${group.leads.map(lead => `
+                    <tr>
+                      <td>${escapeHtml(lead.slNo)}</td>
+                      <td>${escapeHtml(lead.fullName)}</td>
+                      <td>${escapeHtml(lead.phone)}</td>
+                      <td>${escapeHtml(lead.service)}</td>
+                      <td>${escapeHtml(lead.status)}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`).join('');
+      }
+
+      if (button) {
+        button.disabled = !(total > 0 && connectedGroups > 0);
+      }
+    } catch (error) {
+      summary.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(error.message)}</div>`;
+      if (button) button.disabled = true;
+    }
+  }
+
+  async function notifyTelegramTeamOverdue() {
+    const button = document.getElementById('telegramNotifyTeamButton');
+    if (!button) return;
+
+    if (!confirm('Send the current overdue lead list to each connected assigned team member?')) return;
+
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending…';
+
+    try {
+      const data = await telegramApi('/api/telegram/notify-team-overdue', {
+        method: 'POST',
+        body: '{}'
+      });
+
+      if (typeof toast === 'function') {
+        toast(
+          data.sent
+            ? `Overdue notification sent to ${data.sentCount} team member(s).`
+            : data.message || 'No notifications were sent.',
+          data.sent ? 'success' : 'warning'
+        );
+      }
+
+      await Promise.allSettled([
+        loadTelegramTeamOverdue(),
+        loadTelegramNotificationHistory()
+      ]);
+    } catch (error) {
+      if (typeof toast === 'function') toast(error.message, 'danger');
+      else alert(error.message);
+    } finally {
+      button.innerHTML = original;
+      button.disabled = false;
+      await loadTelegramTeamOverdue().catch(() => {});
+    }
+  }
+
+  async function loadTelegramNotificationHistory() {
+    const wrap = document.getElementById('telegramNotificationHistory');
+    if (!wrap) return;
+
+    try {
+      const data = await telegramApi('/api/telegram/team-notification-history?limit=10');
+      const rows = Array.isArray(data.history) ? data.history : [];
+
+      if (!rows.length) {
+        wrap.innerHTML = '<div class="p-3 text-muted small">No team notification history yet.</div>';
+        return;
+      }
+
+      wrap.innerHTML = `
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Sent By</th>
+              <th>Members</th>
+              <th>Leads</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(item => {
+              const failed = Number(item.failedCount || 0);
+              const sent = Number(item.sentCount || 0);
+              const status = failed && sent ? 'Partial' : failed ? 'Failed' : 'Sent';
+              const badge = failed && sent ? 'text-bg-warning' : failed ? 'text-bg-danger' : 'text-bg-success';
+              return `
+                <tr>
+                  <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+                  <td>${escapeHtml(item.sentByName || '—')}</td>
+                  <td>${sent}</td>
+                  <td>${Number(item.sentLeadCount || 0)}</td>
+                  <td><span class="badge ${badge}">${status}</span></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    } catch (error) {
+      wrap.innerHTML = `<div class="p-3 text-danger small">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function isAdminRole(role) {
+    const normalized = String(role || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+    return normalized === 'admin' || normalized === 'super_admin' || normalized === 'superadmin';
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(Number(value));
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
   function escapeHtml(value = '') {
     return String(value)
       .replaceAll('&', '&amp;')
@@ -202,4 +442,7 @@
   window.sendTelegramTestMessage = sendTelegramTestMessage;
   window.disconnectTelegram = disconnectTelegram;
   window.refreshTelegramStatus = refreshTelegramStatus;
+  window.loadTelegramTeamOverdue = loadTelegramTeamOverdue;
+  window.notifyTelegramTeamOverdue = notifyTelegramTeamOverdue;
+  window.loadTelegramNotificationHistory = loadTelegramNotificationHistory;
 })();
