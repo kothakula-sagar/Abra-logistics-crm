@@ -33,6 +33,46 @@ const REMINDER_SCAN_MS =
   Number(process.env.TELEGRAM_REMINDER_SCAN_MS || 60000);
 
 // ============================================================
+// FIRESTORE LOAD PROTECTION
+// ============================================================
+const USER_CACHE_TTL_MS = Number(process.env.CRM_USER_CACHE_TTL_MS || 60000);
+const SETTINGS_CACHE_TTL_MS = Number(process.env.CRM_SETTINGS_CACHE_TTL_MS || 30000);
+const REPORT_CACHE_TTL_MS = Number(process.env.TELEGRAM_REPORT_CACHE_TTL_MS || 60000);
+
+const userCache = new Map();
+let crmSettingsCache = null;
+let crmSettingsCacheAt = 0;
+const reportCache = new Map();
+const campaignReportCache = new Map();
+
+function clearUserCache(uid) {
+  if (uid) userCache.delete(String(uid));
+}
+
+function getCachedUser(uid) {
+  const item = userCache.get(String(uid || ''));
+  if (!item) return null;
+  if (Date.now() - item.cachedAt > USER_CACHE_TTL_MS) {
+    userCache.delete(String(uid || ''));
+    return null;
+  }
+  return item.user;
+}
+
+function setCachedUser(uid, user) {
+  if (!uid || !user) return;
+  userCache.set(String(uid), { cachedAt: Date.now(), user });
+}
+
+function pruneReportCache(cache) {
+  const now = Date.now();
+  for (const [key, item] of cache.entries()) {
+    if (now - item.cachedAt > REPORT_CACHE_TTL_MS) cache.delete(key);
+  }
+}
+
+
+// ============================================================
 // TELEGRAM RUNTIME MODE
 // ============================================================
 // Local development uses polling by default.
@@ -403,28 +443,26 @@ async function verifyFirebaseUser(
         .auth()
         .verifyIdToken(idToken);
 
-    const userSnap =
-      await db
+    let crmUser = getCachedUser(req.firebaseUser.uid);
+
+    if (!crmUser) {
+      const userSnap = await db
         .collection('users')
         .doc(req.firebaseUser.uid)
         .get();
 
-    if (
-      !userSnap.exists ||
-      userSnap.data().active === false
-    ) {
-      return res.status(403).json({
-        ok: false,
-        error:
-          'CRM user is inactive or not provisioned.'
-      });
+      if (!userSnap.exists || userSnap.data().active === false) {
+        return res.status(403).json({
+          ok: false,
+          error: 'CRM user is inactive or not provisioned.'
+        });
+      }
+
+      crmUser = { id: userSnap.id, ...userSnap.data() };
+      setCachedUser(req.firebaseUser.uid, crmUser);
     }
 
-    req.crmUser = {
-      id: userSnap.id,
-      ...userSnap.data()
-    };
-
+    req.crmUser = crmUser;
     next();
 
   } catch (error) {
@@ -433,10 +471,16 @@ async function verifyFirebaseUser(
       error.message
     );
 
-    return res.status(401).json({
+    const quotaExceeded =
+      error.code === 8 ||
+      error.code === 'resource-exhausted' ||
+      String(error.message || '').toLowerCase().includes('quota exceeded');
+
+    return res.status(quotaExceeded ? 503 : 401).json({
       ok: false,
-      error:
-        'Invalid or expired Firebase session.'
+      error: quotaExceeded
+        ? 'Firebase quota is temporarily exhausted. Please try again after the quota resets.'
+        : 'Invalid or expired Firebase session.'
     });
   }
 }
@@ -447,13 +491,16 @@ async function verifyFirebaseUser(
 // ============================================================
 
 async function getCRMSettings() {
+  if (crmSettingsCache && Date.now() - crmSettingsCacheAt < SETTINGS_CACHE_TTL_MS) {
+    return crmSettingsCache;
+  }
   const snap =
     await db
       .collection('crmSettings')
       .doc('general')
       .get();
 
-  return {
+  const defaults = {
     workingDays: [
       'Monday',
       'Tuesday',
@@ -491,6 +538,10 @@ async function getCRMSettings() {
       ? snap.data()
       : {})
   };
+
+  crmSettingsCache = defaults;
+  crmSettingsCacheAt = Date.now();
+  return crmSettingsCache;
 }
 
 
@@ -723,21 +774,21 @@ async function sendToMember(
     };
   }
 
-  const userSnap =
-    await db
+  let member = getCachedUser(memberId);
+
+  if (!member) {
+    const userSnap = await db
       .collection('users')
       .doc(memberId)
       .get();
 
-  if (!userSnap.exists) {
-    return {
-      sent: false,
-      reason: 'member-not-found'
-    };
-  }
+    if (!userSnap.exists) {
+      return { sent: false, reason: 'member-not-found' };
+    }
 
-  const member =
-    userSnap.data();
+    member = { id: userSnap.id, ...userSnap.data() };
+    setCachedUser(memberId, member);
+  }
 
   if (
     member.active === false
@@ -899,22 +950,25 @@ function isAdminOrSuperAdmin(user) {
   );
 }
 
-async function getManagementTelegramUsers() {
-  const snapshot = await db
-    .collection('users')
-    .get();
+let managementTelegramUsersCache = null;
+let managementTelegramUsersCacheAt = 0;
 
-  return snapshot.docs
-    .map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }))
+async function getManagementTelegramUsers() {
+  if (managementTelegramUsersCache && Date.now() - managementTelegramUsersCacheAt < USER_CACHE_TTL_MS) {
+    return managementTelegramUsersCache;
+  }
+
+  const snapshot = await db.collection('users').get();
+  managementTelegramUsersCache = snapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
     .filter(user =>
       user.active !== false &&
       isAdminOrSuperAdmin(user) &&
       user.telegramConnected === true &&
       !!user.telegramChatId
     );
+  managementTelegramUsersCacheAt = Date.now();
+  return managementTelegramUsersCache;
 }
 
 
@@ -1243,6 +1297,10 @@ async function notifyManagementStatusChange(
 
 const liveLeadStatusCache = new Map();
 let leadStatusListenerStarted = false;
+let leadStatusListenerHealthy = false;
+let realtimeInitialSnapshotComplete = false;
+let lastStatusFallbackScanAt = 0;
+const STATUS_FALLBACK_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 function statusEventKey(lead, status) {
   const eventAt = timestampMs(
@@ -1284,144 +1342,88 @@ async function handleRealtimeLeadStatusChange(lead, previousStatus) {
 }
 
 function startLeadStatusRealtimeListener() {
-  if (leadStatusListenerStarted) {
-    return;
-  }
+  if (leadStatusListenerStarted) return;
 
   leadStatusListenerStarted = true;
-
-  console.log(
-    '👂 Starting realtime Firestore lead status listener...'
-  );
+  console.log('👂 Starting realtime Firestore lead status + assignment listener...');
 
   db.collection('leads').onSnapshot(
     snapshot => {
+      leadStatusListenerHealthy = true;
       const tasks = [];
+      const isInitialSnapshot = !realtimeInitialSnapshotComplete;
 
       snapshot.docChanges().forEach(change => {
-        const lead = {
-          id: change.doc.id,
-          ...change.doc.data()
-        };
-
+        const lead = { id: change.doc.id, ...change.doc.data() };
         const currentStatus = leadStatus(lead);
-        const cachedStatus = liveLeadStatusCache.get(lead.id);
-
-        // Initial snapshot: establish the baseline but DO NOT notify.
-        if (change.type === 'added' && cachedStatus === undefined) {
-          liveLeadStatusCache.set(lead.id, currentStatus);
-          return;
-        }
+        const currentAssignment = lead.assignedTo || null;
+        const cached = liveLeadStatusCache.get(lead.id);
 
         if (change.type === 'removed') {
           liveLeadStatusCache.delete(lead.id);
           return;
         }
 
-        // Modified document. Compare against the last status we saw.
-        const previousStatus = cachedStatus;
-        liveLeadStatusCache.set(lead.id, currentStatus);
+        if (isInitialSnapshot && change.type === 'added' && !cached) {
+          liveLeadStatusCache.set(lead.id, {
+            status: currentStatus,
+            assignedTo: currentAssignment
+          });
+          return;
+        }
+
+        const previousStatus = cached?.status;
+        const previousAssignment = cached?.assignedTo || null;
+
+        liveLeadStatusCache.set(lead.id, {
+          status: currentStatus,
+          assignedTo: currentAssignment
+        });
 
         if (
           previousStatus !== undefined &&
-          String(previousStatus).trim().toLowerCase() !==
-            String(currentStatus).trim().toLowerCase()
+          String(previousStatus).trim().toLowerCase() !== String(currentStatus).trim().toLowerCase()
         ) {
           tasks.push(
-            handleRealtimeLeadStatusChange(
-              lead,
-              previousStatus
-            ).catch(error => {
-              console.error(
-                `Realtime status notification failed for ${lead.id}:`,
-                error.message
-              );
+            handleRealtimeLeadStatusChange(lead, previousStatus).catch(error => {
+              console.error(`Realtime status notification failed for ${lead.id}:`, error.message);
+            })
+          );
+        }
+
+        const assignmentChanged =
+          previousAssignment !== currentAssignment &&
+          !!currentAssignment &&
+          lead.assignmentStatus === 'assigned';
+
+        if (!isInitialSnapshot && assignmentChanged) {
+          tasks.push(
+            notifyAssignment(lead).catch(error => {
+              console.error(`Realtime assignment notification failed for ${lead.id}:`, error.message);
             })
           );
         }
       });
 
-      if (tasks.length) {
-        Promise.allSettled(tasks).catch(() => {});
-      }
+      realtimeInitialSnapshotComplete = true;
+      if (tasks.length) Promise.allSettled(tasks).catch(() => {});
     },
     error => {
-      console.error(
-        '❌ Firestore realtime lead status listener error:',
-        error.message
-      );
-      // Do not stop the server. The existing polling detector will
-      // continue to act as the fallback notification mechanism.
+      leadStatusListenerHealthy = false;
+      console.error('❌ Firestore realtime lead status listener error:', error.message);
     }
   );
 }
-
 
 // ============================================================
 // STATUS CHANGE DETECTOR - POLLING FALLBACK
 // ============================================================
 
 async function processStatusChanges() {
-  const settings = await getCRMSettings();
-
-  if (settings.telegramStatusAlerts === false) {
-    return;
-  }
-
-  const snapshot = await db
-    .collection('leads')
-    .get();
-
-  for (const doc of snapshot.docs) {
-    const lead = {
-      id: doc.id,
-      ...doc.data()
-    };
-
-    const status = leadStatus(lead);
-
-    if (!status) {
-      continue;
-    }
-
-    const ref = db
-      .collection('telegramLeadStatusSnapshots')
-      .doc(doc.id);
-
-    const previousSnap = await ref.get();
-    const previousStatus = previousSnap.exists
-      ? String(previousSnap.data().status || '')
-      : null;
-
-    if (!previousSnap.exists) {
-      await ref.set({
-        status,
-        updatedAt: FieldValue.serverTimestamp()
-      });
-      continue;
-    }
-
-    if (previousStatus === status) {
-      continue;
-    }
-
-    await ref.set({
-      status,
-      updatedAt: FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    if (
-      status.toLowerCase() === 'interested' ||
-      status.toLowerCase() === 'not interested'
-    ) {
-      await notifyManagementStatusChange(
-        lead,
-        previousStatus
-      );
-    }
-  }
+  // Realtime Firestore listener handles status changes immediately.
+  // Do not download the entire leads collection as a one-minute fallback.
+  return;
 }
-
 
 // ============================================================
 // MANAGEMENT OVERDUE MESSAGE
@@ -1491,8 +1493,16 @@ async function scanManagementOverdues() {
     return;
   }
 
+  const overdueStatuses = [
+    'Not Open', 'Not Opened', 'New',
+    'Call Back Later', 'Callback Later',
+    'Follow Up', 'Follow-Up', 'Followup',
+    'Not Picking Call', 'Not Picking'
+  ];
+
   const snapshot = await db
     .collection('leads')
+    .where('status', 'in', overdueStatuses)
     .get();
 
   for (const doc of snapshot.docs) {
@@ -1640,9 +1650,25 @@ function dailyReportMessage(report, dateKey) {
 }
 
 async function buildDailyReport(dateKey, timezone) {
-  const snapshot = await db
-    .collection('leads')
-    .get();
+  pruneReportCache(reportCache);
+  const cacheKey = `${timezone}:${dateKey}`;
+  const cached = reportCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < REPORT_CACHE_TTL_MS) return cached.report;
+
+  const start = new Date(`${dateKey}T00:00:00+05:30`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  let snapshot;
+  try {
+    snapshot = await db
+      .collection('leads')
+      .where('createdAt', '>=', admin.firestore.Timestamp.fromDate(start))
+      .where('createdAt', '<', admin.firestore.Timestamp.fromDate(end))
+      .get();
+  } catch (error) {
+    if (error.code === 8 || error.code === 'resource-exhausted') throw error;
+    console.warn('Daily report date query failed; using fallback scan:', error.message);
+    snapshot = await db.collection('leads').get();
+  }
 
   const report = {
     total: 0,
@@ -1727,6 +1753,7 @@ async function buildDailyReport(dateKey, timezone) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
+  reportCache.set(cacheKey, { cachedAt: Date.now(), report });
   return report;
 }
 
@@ -2019,15 +2046,10 @@ async function scanOverdueLeads() {
     return;
   }
 
-  const snapshot =
-    await db
-      .collection('leads')
-      .where(
-        'status',
-        '==',
-        'Not Open'
-      )
-      .get();
+  const snapshot = await db
+    .collection('leads')
+    .where('status', 'in', ['Not Open', 'Not Opened', 'New'])
+    .get();
 
 
   for (
@@ -2305,39 +2327,10 @@ async function initializeAssignmentDeliveryBaseline() {
 // ============================================================
 
 async function processNewAssignments() {
-
-  const settings =
-    await getCRMSettings();
-
-  if (
-    settings.telegramAlerts ===
-    false
-  ) {
-    return;
-  }
-
-  const snapshot =
-    await db
-      .collection('leads')
-      .where(
-        'assignmentStatus',
-        '==',
-        'assigned'
-      )
-      .get();
-
-
-  for (
-    const doc of snapshot.docs
-  ) {
-
-    await notifyAssignment({
-      id: doc.id,
-      ...doc.data()
-    });
-  }
+  // Assignment notifications are handled by the realtime lead listener.
+  // Avoid a full assigned-leads query every minute.
+  return;
 }
-
 
 // ============================================================
 // TELEGRAM NOTIFICATION CYCLE
@@ -2384,21 +2377,26 @@ async function runNotificationCycle() {
 // TELEGRAM REPORT / TEAM NOTIFICATION HELPERS
 // ============================================================
 
+const telegramChatUserCache = new Map();
+
 async function getTelegramCRMUserByChatId(chatId) {
+  const key = String(chatId);
+  const cached = telegramChatUserCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < USER_CACHE_TTL_MS) return cached.user;
+
   const snapshot = await db
     .collection('users')
-    .where('telegramChatId', '==', String(chatId))
+    .where('telegramChatId', '==', key)
     .limit(1)
     .get();
 
-  if (snapshot.empty) {
-    return null;
-  }
+  const user = snapshot.empty
+    ? null
+    : { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
 
-  return {
-    id: snapshot.docs[0].id,
-    ...snapshot.docs[0].data()
-  };
+  telegramChatUserCache.set(key, { cachedAt: Date.now(), user });
+  if (user) setCachedUser(user.id, user);
+  return user;
 }
 
 function reportStatusCount(report) {
@@ -2487,7 +2485,25 @@ function parseTelegramReportDate(value, timezone = 'Asia/Kolkata') {
 }
 
 async function buildTelegramCampaignReport(dateKey, timezone = 'Asia/Kolkata') {
-  const snapshot = await db.collection('leads').get();
+  pruneReportCache(campaignReportCache);
+  const cacheKey = `${timezone}:${dateKey}`;
+  const cached = campaignReportCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < REPORT_CACHE_TTL_MS) return cached.campaigns;
+
+  const start = new Date(`${dateKey}T00:00:00+05:30`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  let snapshot;
+  try {
+    snapshot = await db
+      .collection('leads')
+      .where('createdAt', '>=', admin.firestore.Timestamp.fromDate(start))
+      .where('createdAt', '<', admin.firestore.Timestamp.fromDate(end))
+      .get();
+  } catch (error) {
+    if (error.code === 8 || error.code === 'resource-exhausted') throw error;
+    console.warn('Campaign report date query failed; using fallback scan:', error.message);
+    snapshot = await db.collection('leads').get();
+  }
   const campaigns = new Map();
 
   const campaignValue = lead => {
@@ -2547,8 +2563,10 @@ async function buildTelegramCampaignReport(dateKey, timezone = 'Asia/Kolkata') {
     campaigns.set(name, current);
   }
 
-  return Array.from(campaigns.values())
+  const result = Array.from(campaigns.values())
     .sort((a, b) => b.leads - a.leads || a.name.localeCompare(b.name));
+  campaignReportCache.set(cacheKey, { cachedAt: Date.now(), campaigns: result });
+  return result;
 }
 
 function telegramCampaignReportMessage(campaigns, dateKey) {
@@ -2581,7 +2599,16 @@ function telegramCampaignReportMessage(campaigns, dateKey) {
 async function getTeamOverdueLeads() {
   const settings = await getCRMSettings();
   const now = Date.now();
-  const snapshot = await db.collection('leads').get();
+  const overdueStatuses = [
+    'Not Open', 'Not Opened', 'New',
+    'Call Back Later', 'Callback Later',
+    'Follow Up', 'Follow-Up', 'Followup',
+    'Not Picking Call', 'Not Picking'
+  ];
+  const snapshot = await db
+    .collection('leads')
+    .where('status', 'in', overdueStatuses)
+    .get();
   const groups = new Map();
   const memberCache = new Map();
   let unassigned = 0;
@@ -2798,6 +2825,10 @@ async function handleTelegramMessage(message) {
       telegramConnectedAt: null,
       telegramUpdatedAt: FieldValue.serverTimestamp()
     });
+
+    clearUserCache(userSnap.docs[0].id);
+    managementTelegramUsersCache = null;
+    managementTelegramUsersCacheAt = 0;
 
     await telegram('sendMessage', {
       chat_id: chatId,
@@ -3251,6 +3282,10 @@ app.post(
           telegramUpdatedAt:
             FieldValue.serverTimestamp()
         });
+
+      clearUserCache(req.firebaseUser.uid);
+      managementTelegramUsersCache = null;
+      managementTelegramUsersCacheAt = 0;
 
 
       console.log(
