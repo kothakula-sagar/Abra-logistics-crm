@@ -155,7 +155,7 @@
             <div class="marketing-campaign-name">${esc(campaign.name)}</div>
             <div class="small text-muted">${channel === 'email' ? 'Subject' : 'Message'}: ${esc(campaign.subject || campaign.body || '')}</div>
           </div>
-          <span class="badge bg-light text-dark">${recipients} recipients</span>
+          <div class="d-flex flex-column align-items-end gap-1"><span class="badge bg-light text-dark">${recipients} recipients</span>${channel === 'email' ? `<span class="badge bg-primary-subtle text-primary">${esc(campaign.emailProvider || 'Gmail')}</span>` : '<span class="badge bg-success-subtle text-success">WhatsApp</span>'}</div>
         </div>
         <div class="marketing-campaign-preview">${esc(campaign.body || '')}</div>
         <div class="marketing-campaign-meta">
@@ -185,7 +185,7 @@
       </div>
       <div class="marketing-detail-heading">
         <h2>${esc(campaign.name)}</h2>
-        <p>${channel === 'email' ? `Subject: ${esc(campaign.subject || '')}` : 'Personalized WhatsApp message'}</p>
+        <p>${channel === 'email' ? `Subject: ${esc(campaign.subject || '')} · Opens in ${esc(campaign.emailProvider || 'Gmail')}` : 'Personalized WhatsApp message'}</p>
       </div>
       <div class="marketing-message-preview">
         ${channel === 'email' ? `<div><strong>Subject</strong><div>${esc(campaign.subject || '')}</div></div>` : ''}
@@ -201,7 +201,7 @@
         </div>
         <div class="table-responsive">
           <table class="table align-middle marketing-table mb-0">
-            <thead><tr><th>Sl No</th><th>Name</th><th>${channel === 'email' ? 'Email' : 'Number'}</th><th>Company</th><th>Status</th><th>Action</th><th>Sent By</th></tr></thead>
+            <thead><tr><th>Sl No</th><th>Name</th><th>${channel === 'email' ? 'Email' : 'Number'}</th><th>Status</th><th>Sent Through</th><th>Action</th><th>Sent By</th></tr></thead>
             <tbody>
               ${filtered.length ? filtered.map((c, i) => recipientRow(channel, campaign, c, i + 1, sentMap[c.id])).join('') : `<tr><td colspan="7" class="text-center py-4 text-muted">No matching subscribed customers.</td></tr>`}
             </tbody>
@@ -214,6 +214,7 @@
     const destination = channel === 'email' ? contact.email : normalisePhone(contact.phone);
     const opened = !!sent;
     const sentBy = sent?.sentByName || '—';
+    const sentThrough = sent?.sentThrough || (channel === 'email' ? campaign.emailProvider || 'Gmail' : 'WhatsApp');
     const sentText = opened ? `Opened · ${fmtDate(sent.openedAt)}` : 'Not Sent';
     const action = destination
       ? `<button class="btn btn-sm ${channel === 'email' ? 'btn-brand' : 'btn-success'}" onclick="window.MarketingChannels.openMessage('${channel}','${campaign.id}','${contact.id}')"><i class="bi ${channel === 'email' ? 'bi-envelope-at' : 'bi-whatsapp'} me-1"></i>${channel === 'email' ? 'Send Email' : 'Open WhatsApp'}</button>`
@@ -222,8 +223,8 @@
       <td>${index}</td>
       <td><strong>${esc(contact.name)}</strong></td>
       <td>${esc(channel === 'email' ? contact.email : contact.phone)}</td>
-      <td>${esc(contact.company || '—')}</td>
       <td><span class="badge ${opened ? 'bg-success-subtle text-success' : 'bg-light text-dark'}">${esc(sentText)}</span></td>
+      <td><span class="badge bg-light text-dark">${esc(sentThrough)}</span></td>
       <td>${action}</td>
       <td>${esc(sentBy)}</td>
     </tr>`;
@@ -369,8 +370,10 @@
     document.getElementById('marketingCampaignChannel').value = channel;
     document.getElementById('marketingCampaignName').value = campaign?.name || '';
     document.getElementById('marketingCampaignSubject').value = campaign?.subject || '';
+    document.getElementById('marketingCampaignEmailProvider').value = campaign?.emailProvider || 'Gmail';
     document.getElementById('marketingCampaignBody').value = campaign?.body || '';
     document.getElementById('marketingCampaignSubjectWrap').classList.toggle('d-none', channel !== 'email');
+    document.getElementById('marketingCampaignEmailProviderWrap').classList.toggle('d-none', channel !== 'email');
     document.getElementById('marketingCampaignPlaceholderHelp').textContent = channel === 'email'
       ? 'Use {{Name}} in the subject or body. It will be replaced with each customer’s name.'
       : 'Use {{Name}} in the message. It will be replaced with each customer’s name.';
@@ -383,6 +386,7 @@
     const channel = document.getElementById('marketingCampaignChannel').value;
     const name = document.getElementById('marketingCampaignName').value.trim();
     const subject = document.getElementById('marketingCampaignSubject').value.trim();
+    const emailProvider = document.getElementById('marketingCampaignEmailProvider').value;
     const body = document.getElementById('marketingCampaignBody').value.trim();
     if (!name || !body) {
       if (typeof toast === 'function') toast('Campaign name and body are required.', 'warning');
@@ -396,6 +400,7 @@
       name,
       subject: channel === 'email' ? subject : '',
       body,
+      emailProvider: channel === 'email' ? (emailProvider === 'Outlook' ? 'Outlook' : 'Gmail') : '',
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedBy: window.CURRENT_USER.uid,
       updatedByName: window.CURRENT_USER.name || window.CURRENT_USER.email
@@ -452,7 +457,12 @@
     let url = '';
     if (channel === 'email') {
       const subject = replacePlaceholders(campaign.subject, contact);
-      url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      const provider = campaign.emailProvider === 'Outlook' ? 'Outlook' : 'Gmail';
+      if (provider === 'Outlook') {
+        url = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(contact.email)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      } else {
+        url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      }
     } else {
       const phone = normalisePhone(contact.phone);
       if (!phone) {
@@ -468,6 +478,7 @@
       await getCampaignRef(channel).doc(campaignId).update({
         [`sentRecipients.${contactId}`]: {
           openedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          sentThrough: channel === 'email' ? (campaign.emailProvider === 'Outlook' ? 'Outlook' : 'Gmail') : 'WhatsApp',
           sentBy: window.CURRENT_USER.uid,
           sentByName: window.CURRENT_USER.name || window.CURRENT_USER.email
         }
