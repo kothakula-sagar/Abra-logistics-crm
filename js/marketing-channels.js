@@ -459,9 +459,11 @@
       const subject = replacePlaceholders(campaign.subject, contact);
       const provider = campaign.emailProvider === 'Outlook' ? 'Outlook' : 'Gmail';
       if (provider === 'Outlook') {
-        // Launch the installed Outlook desktop app through its Windows URI scheme.
-        // This is intentionally NOT the Outlook Web compose URL.
-        url = `ms-outlook://compose?to=${encodeURIComponent(contact.email)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        // Use the Windows mailto scheme so the installed/default Outlook desktop
+        // app opens a NEW compose window with To, Subject and Body prefilled.
+        // The ms-outlook://compose scheme can launch Outlook but is not reliable
+        // on Windows desktop for carrying the compose fields into the new Outlook UI.
+        url = `mailto:${encodeURIComponent(contact.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       } else {
         url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       }
@@ -474,9 +476,8 @@
       url = `https://wa.me/${phone}?text=${encodeURIComponent(body)}`;
     }
     if (channel === 'email' && campaign.emailProvider === 'Outlook') {
-      // Custom URI schemes are handled by the OS and can launch Outlook itself.
-      // location.href is used instead of window.open so the browser does not
-      // reinterpret the Outlook URI as a normal web page.
+      // mailto: is handled by Windows' default mail application. Set Outlook as
+      // the default mail app on the CRM computer to ensure this opens Outlook.
       window.location.href = url;
     } else {
       window.open(url, '_blank', 'noopener,noreferrer');
