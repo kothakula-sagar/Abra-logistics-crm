@@ -97,7 +97,7 @@ function buildNav() {
   const nav     = document.getElementById("sideNav");
   const isSA    = CURRENT_USER.role === "superadmin";
   const canViewLeads = isSA || hasPermission("leads.view");
-  const canViewDashboard = isSA || hasPermission("dashboard.view");
+  const canViewDashboard = !!CURRENT_USER?.active;
   const canViewFollowups = isSA || hasPermission("followups.view");
   const canViewUrgent = isSA || hasPermission("urgent.view");
   const canViewCallAudit = isSA || hasPermission("callAudit.view");
@@ -113,6 +113,8 @@ function buildNav() {
   const canViewPermissions = isSA;
   const canViewEmailMarketing = !!CURRENT_USER?.active;
   const canViewWhatsAppMarketing = !!CURRENT_USER?.active;
+  const canViewCustomers = !!CURRENT_USER?.active;
+  const canViewDocs = !!CURRENT_USER?.active;
 
   let html = "";
 
@@ -207,6 +209,20 @@ function buildNav() {
     </a>`;
   }
 
+  if (canViewCustomers) {
+    html += `
+    <a href="#" class="nav-link nav-item-link" data-view="customers">
+      <i class="bi bi-people"></i> Customers
+    </a>`;
+  }
+
+  if (canViewDocs) {
+    html += `
+    <a href="#" class="nav-link nav-item-link" data-view="docs">
+      <i class="bi bi-book"></i> Docs
+    </a>`;
+  }
+
   if (canViewCampaigns) {
     html += `
     <a href="#" class="nav-link nav-item-link" data-view="campaigns">
@@ -257,6 +273,7 @@ function buildNav() {
 function canAccessView(viewName) {
   if (!viewName) return false;
   if (CURRENT_USER && CURRENT_USER.role === "superadmin") return true;
+  if (CURRENT_USER?.active && ["dashboard", "customers", "docs", "emailmarketing", "whatsappmarketing"].includes(viewName)) return true;
   const requiredPermission = window.PERMISSION_VIEW_PATHS && window.PERMISSION_VIEW_PATHS[viewName];
   return !requiredPermission || hasPermission(requiredPermission);
 }
@@ -351,7 +368,15 @@ function showView(viewName) {
     }
 
     if (viewName === "dashboard") {
-      if (typeof renderDashboardCards === "function") renderDashboardCards();
+      if (window.SuperDashboard?.render) window.SuperDashboard.render();
+    }
+
+    if (viewName === "customers") {
+      if (window.Customers?.init) window.Customers.init();
+    }
+
+    if (viewName === "docs") {
+      // Static documentation view; no Firebase read required.
     }
 
     if (viewName === "auditlog") {

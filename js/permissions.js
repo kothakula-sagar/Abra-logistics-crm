@@ -28,6 +28,8 @@
       reports: { view: true, export: true },
       emailMarketing: { view: true },
       whatsappMarketing: { view: true },
+      customers: { view: true },
+      docs: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: true, approve: false, reject: false },
       hrTransfers: { view: true, request: false, approve: true, reject: true, assign: true, viewHistory: true },
       training: { view: true, takeCourse: true, takeQuiz: true, viewCertificate: true, manageCourses: false, manageCategories: false, viewTeamProgress: true },
@@ -40,7 +42,7 @@
       permissionSettings: { view: false, edit: false }
     },
     member: {
-      dashboard: { view: false },
+      dashboard: { view: true },
       leads: {
         view: true,
         viewAll: false,
@@ -58,6 +60,8 @@
       reports: { view: false, export: false },
       emailMarketing: { view: true },
       whatsappMarketing: { view: true },
+      customers: { view: true },
+      docs: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: false, approve: false, reject: false },
       hrTransfers: { view: false, request: true, approve: false, reject: false, assign: false, viewHistory: false },
       training: { view: true, takeCourse: true, takeQuiz: true, viewCertificate: true, manageCourses: false, manageCategories: false, viewTeamProgress: false },
@@ -70,7 +74,7 @@
       permissionSettings: { view: false, edit: false }
     },
     hr: {
-      dashboard: { view: false },
+      dashboard: { view: true },
       leads: {
         view: true,
         viewAll: false,
@@ -88,6 +92,8 @@
       reports: { view: false, export: false },
       emailMarketing: { view: true },
       whatsappMarketing: { view: true },
+      customers: { view: true },
+      docs: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: false, approve: false, reject: false },
       hrTransfers: { view: true, request: false, approve: false, reject: false, assign: false, viewHistory: true },
       training: { view: true, takeCourse: true, takeQuiz: true, viewCertificate: true, manageCourses: false, manageCategories: false, viewTeamProgress: false },
@@ -495,6 +501,8 @@
     report: 'reports.view',
     emailmarketing: 'emailMarketing.view',
     whatsappmarketing: 'whatsappMarketing.view',
+    customers: 'customers.view',
+    docs: 'docs.view',
     leave: 'leave.view',
     hrtransfers: 'hrTransfers.view',
     training: 'training.view',
