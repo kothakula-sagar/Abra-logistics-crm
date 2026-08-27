@@ -67,6 +67,9 @@
   const certificatesRef = firestoreAvailable ? db.collection("certificates") : null;
   const knowledgeBaseRef = firestoreAvailable ? db.collection("knowledgeBase") : null;
   const quizzesRef = firestoreAvailable ? db.collection("quizzes") : null;
+  const marketingContactsRef = firestoreAvailable ? db.collection("marketingContacts") : null;
+  const emailMarketingCampaignsRef = firestoreAvailable ? db.collection("emailMarketingCampaigns") : null;
+  const whatsappMarketingCampaignsRef = firestoreAvailable ? db.collection("whatsappMarketingCampaigns") : null;
 
   // Export all references globally
   window.usersRef = usersRef;
@@ -83,6 +86,9 @@
   window.certificatesRef = certificatesRef;
   window.knowledgeBaseRef = knowledgeBaseRef;
   window.quizzesRef = quizzesRef;
+  window.marketingContactsRef = marketingContactsRef;
+  window.emailMarketingCampaignsRef = emailMarketingCampaignsRef;
+  window.whatsappMarketingCampaignsRef = whatsappMarketingCampaignsRef;
 
   // Utility functions for checking service availability
   window.isFirestoreAvailable = function() { return firestoreAvailable; };

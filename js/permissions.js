@@ -26,6 +26,8 @@
       urgent: { view: true },
       callAudit: { view: true, submit: false, approve: true, reject: true, recall: true, viewRecording: true },
       reports: { view: true, export: true },
+      emailMarketing: { view: true },
+      whatsappMarketing: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: true, approve: false, reject: false },
       hrTransfers: { view: true, request: false, approve: true, reject: true, assign: true, viewHistory: true },
       training: { view: true, takeCourse: true, takeQuiz: true, viewCertificate: true, manageCourses: false, manageCategories: false, viewTeamProgress: true },
@@ -54,6 +56,8 @@
       urgent: { view: true },
       callAudit: { view: false, submit: true, approve: false, reject: false, recall: false, viewRecording: false },
       reports: { view: false, export: false },
+      emailMarketing: { view: true },
+      whatsappMarketing: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: false, approve: false, reject: false },
       hrTransfers: { view: false, request: true, approve: false, reject: false, assign: false, viewHistory: false },
       training: { view: true, takeCourse: true, takeQuiz: true, viewCertificate: true, manageCourses: false, manageCategories: false, viewTeamProgress: false },
@@ -82,6 +86,8 @@
       urgent: { view: true },
       callAudit: { view: false, submit: false, approve: false, reject: false, recall: false, viewRecording: false },
       reports: { view: false, export: false },
+      emailMarketing: { view: true },
+      whatsappMarketing: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: false, approve: false, reject: false },
       hrTransfers: { view: true, request: false, approve: false, reject: false, assign: false, viewHistory: true },
       training: { view: true, takeCourse: true, takeQuiz: true, viewCertificate: true, manageCourses: false, manageCategories: false, viewTeamProgress: false },
@@ -302,6 +308,12 @@
         ['reports.view', 'View Reports'],
         ['reports.export', 'Export Reports']
       ] },
+      { title: 'Email Marketing', key: 'emailMarketing', permissions: [
+        ['emailMarketing.view', 'View Email Marketing']
+      ] },
+      { title: 'WhatsApp Marketing', key: 'whatsappMarketing', permissions: [
+        ['whatsappMarketing.view', 'View WhatsApp Marketing']
+      ] },
       { title: 'Leave Management', key: 'leave', permissions: [
         ['leave.view', 'View Leave'],
         ['leave.apply', 'Apply Leave'],
@@ -488,6 +500,8 @@
     urgent: 'urgent.view',
     callaudit: 'callAudit.view',
     report: 'reports.view',
+    emailmarketing: 'emailMarketing.view',
+    whatsappmarketing: 'whatsappMarketing.view',
     leave: 'leave.view',
     hrtransfers: 'hrTransfers.view',
     training: 'training.view',

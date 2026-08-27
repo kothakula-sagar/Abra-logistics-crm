@@ -487,6 +487,12 @@ async function loadLeadsPage(page, direction = "next") {
         refreshLeadDependentViews();
       }
 
+      // Marketing consumes the lead page already loaded here. No second leads
+      // query is made by the marketing module.
+      if (window.MarketingChannels?.syncLoadedLeads) {
+        window.MarketingChannels.syncLoadedLeads(ALL_LEADS).catch(err => console.error("Marketing loaded-lead sync failed:", err));
+      }
+
       PAGINATION_STATE.isLoading = false;
     }, (error) => {
       console.error("Error listening to leads updates:", error);
@@ -1372,6 +1378,12 @@ async function updateLeadStatus(leadId, newStatus, noteText) {
 
   await leadRef.update(updateData);
 
+  // Explicitly unsubscribe a marketing contact when a lead is marked Not Interested.
+  // This does not perform a second leads read.
+  if (finalStatus === "Not Interested" && window.MarketingChannels?.syncLeadUpdate) {
+    window.MarketingChannels.syncLeadUpdate({ ...leadData, id: leadId, status: finalStatus }).catch(err => console.error("Marketing unsubscribe sync failed:", err));
+  }
+
   // ✅ HR TRANSFER: Automatically create transfer request for Driver status
   if (finalStatus === "Driver" && !leadData.hrTransferCreated) {
     // Only create transfer if function is available (hr-transfers.js loaded)
@@ -1410,6 +1422,10 @@ async function deleteLead(leadId) {
     deletedAt: firebase.firestore.Timestamp.now()
   });
   await leadsRef.doc(leadId).delete();
+  if (window.marketingContactsRef) {
+    try { await window.marketingContactsRef.doc(`lead_${leadId}`).delete(); }
+    catch (err) { console.error("Failed to remove deleted lead from marketing contacts:", err); }
+  }
 }
 
 async function editLeadDetails(leadId, formData) {

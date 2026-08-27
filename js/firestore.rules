@@ -546,6 +546,38 @@ service cloud.firestore {
 
 
     // ============================================================
+    // MARKETING CONTACTS + CHANNEL CAMPAIGNS
+    // ============================================================
+    //
+    // All active CRM users can view/edit marketing customers and
+    // create/edit campaigns. Admin + Super Admin can delete.
+    // The client uses this small contact cache instead of issuing
+    // another full /leads query every time a marketing screen opens.
+    // ============================================================
+
+    match /marketingContacts/{contactId} {
+      allow read, create, update: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /emailMarketingCampaigns/{campaignId} {
+      allow read, create, update: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /whatsappMarketingCampaigns/{campaignId} {
+      allow read, create, update: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+
+    // ============================================================
     // CAMPAIGNS
     // ============================================================
     //

@@ -112,6 +112,8 @@ function buildNav() {
   const canViewCRMSettings = isSA || hasPermission("crmSettings.view");
   const canViewAISettings = isSA || hasPermission("aiSettings.view");
   const canViewPermissions = isSA;
+  const canViewEmailMarketing = isSA || hasPermission("emailMarketing.view");
+  const canViewWhatsAppMarketing = isSA || hasPermission("whatsappMarketing.view");
 
   let html = "";
 
@@ -197,6 +199,20 @@ function buildNav() {
     html += `
     <a href="#" class="nav-link nav-item-link" data-view="users">
       <i class="bi bi-people"></i> Manage Team
+    </a>`;
+  }
+
+  if (canViewEmailMarketing) {
+    html += `
+    <a href="#" class="nav-link nav-item-link" data-view="emailmarketing">
+      <i class="bi bi-envelope-at"></i> Email Marketing
+    </a>`;
+  }
+
+  if (canViewWhatsAppMarketing) {
+    html += `
+    <a href="#" class="nav-link nav-item-link" data-view="whatsappmarketing">
+      <i class="bi bi-whatsapp"></i> WhatsApp Marketing
     </a>`;
   }
 
@@ -395,6 +411,14 @@ function showView(viewName) {
           container.innerHTML = '<div class="alert alert-danger">Sales Academy module failed to load. Please refresh the page.</div>';
         }
       }
+    }
+
+    if (viewName === "emailmarketing") {
+      if (window.MarketingChannels) window.MarketingChannels.openView("email");
+    }
+
+    if (viewName === "whatsappmarketing") {
+      if (window.MarketingChannels) window.MarketingChannels.openView("whatsapp");
     }
 
     if (viewName === "users") {

@@ -598,6 +598,18 @@ async function smartCreateLead(formData) {
     : "Created outside valid assignment window";
   await writeAuditLog(newLeadRef.id, nextSlNo, action, reason, CURRENT_USER.name || CURRENT_USER.email);
 
+  // Keep the marketing contact cache in sync without re-reading the new lead.
+  if (window.MarketingChannels?.syncLeadUpdate) {
+    window.MarketingChannels.syncLeadUpdate({
+      id: newLeadRef.id,
+      fullName: formData.fullName,
+      email: formData.email || "",
+      phoneNumber: formData.phoneNumber || "",
+      companyName: formData.companyName || "",
+      status: "Not Open"
+    }).catch(err => console.error("Marketing contact sync failed:", err));
+  }
+
   if (!assignedMember) {
     toast("Lead saved with Pending Assignment — will be assigned at next office opening.", "warning");
   }
