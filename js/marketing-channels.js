@@ -155,7 +155,7 @@
             <div class="marketing-campaign-name">${esc(campaign.name)}</div>
             <div class="small text-muted">${channel === 'email' ? 'Subject' : 'Message'}: ${esc(campaign.subject || campaign.body || '')}</div>
           </div>
-          <div class="d-flex flex-column align-items-end gap-1"><span class="badge bg-light text-dark">${recipients} recipients</span>${channel === 'email' ? `<span class="badge bg-primary-subtle text-primary">${esc(campaign.emailProvider || 'Gmail')}</span>` : '<span class="badge bg-success-subtle text-success">WhatsApp</span>'}</div>
+          <div class="d-flex flex-column align-items-end gap-1"><span class="badge bg-light text-dark">${recipients} recipients</span>${channel === 'email' ? `<span class="badge bg-primary-subtle text-primary">${esc(campaign.emailProvider === 'Outlook' ? 'Outlook App' : (campaign.emailProvider || 'Gmail'))}</span>` : '<span class="badge bg-success-subtle text-success">WhatsApp</span>'}</div>
         </div>
         <div class="marketing-campaign-preview">${esc(campaign.body || '')}</div>
         <div class="marketing-campaign-meta">
@@ -185,7 +185,7 @@
       </div>
       <div class="marketing-detail-heading">
         <h2>${esc(campaign.name)}</h2>
-        <p>${channel === 'email' ? `Subject: ${esc(campaign.subject || '')} · Opens in ${esc(campaign.emailProvider || 'Gmail')}` : 'Personalized WhatsApp message'}</p>
+        <p>${channel === 'email' ? `Subject: ${esc(campaign.subject || '')} · Opens in ${esc(campaign.emailProvider === 'Outlook' ? 'Outlook App' : (campaign.emailProvider || 'Gmail'))}` : 'Personalized WhatsApp message'}</p>
       </div>
       <div class="marketing-message-preview">
         ${channel === 'email' ? `<div><strong>Subject</strong><div>${esc(campaign.subject || '')}</div></div>` : ''}
@@ -214,7 +214,7 @@
     const destination = channel === 'email' ? contact.email : normalisePhone(contact.phone);
     const opened = !!sent;
     const sentBy = sent?.sentByName || '—';
-    const sentThrough = sent?.sentThrough || (channel === 'email' ? campaign.emailProvider || 'Gmail' : 'WhatsApp');
+    const sentThrough = sent?.sentThrough || (channel === 'email' ? (campaign.emailProvider === 'Outlook' ? 'Outlook App' : (campaign.emailProvider || 'Gmail')) : 'WhatsApp');
     const sentText = opened ? `Opened · ${fmtDate(sent.openedAt)}` : 'Not Sent';
     const action = destination
       ? `<button class="btn btn-sm ${channel === 'email' ? 'btn-brand' : 'btn-success'}" onclick="window.MarketingChannels.openMessage('${channel}','${campaign.id}','${contact.id}')"><i class="bi ${channel === 'email' ? 'bi-envelope-at' : 'bi-whatsapp'} me-1"></i>${channel === 'email' ? 'Send Email' : 'Open WhatsApp'}</button>`
@@ -459,7 +459,9 @@
       const subject = replacePlaceholders(campaign.subject, contact);
       const provider = campaign.emailProvider === 'Outlook' ? 'Outlook' : 'Gmail';
       if (provider === 'Outlook') {
-        url = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(contact.email)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        // Launch the installed Outlook desktop app through its Windows URI scheme.
+        // This is intentionally NOT the Outlook Web compose URL.
+        url = `ms-outlook://compose?to=${encodeURIComponent(contact.email)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       } else {
         url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       }
@@ -471,14 +473,21 @@
       }
       url = `https://wa.me/${phone}?text=${encodeURIComponent(body)}`;
     }
-    window.open(url, '_blank', 'noopener,noreferrer');
+    if (channel === 'email' && campaign.emailProvider === 'Outlook') {
+      // Custom URI schemes are handled by the OS and can launch Outlook itself.
+      // location.href is used instead of window.open so the browser does not
+      // reinterpret the Outlook URI as a normal web page.
+      window.location.href = url;
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
 
     try {
       const current = campaign.sentRecipients || {};
       await getCampaignRef(channel).doc(campaignId).update({
         [`sentRecipients.${contactId}`]: {
           openedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          sentThrough: channel === 'email' ? (campaign.emailProvider === 'Outlook' ? 'Outlook' : 'Gmail') : 'WhatsApp',
+          sentThrough: channel === 'email' ? (campaign.emailProvider === 'Outlook' ? 'Outlook App' : 'Gmail') : 'WhatsApp',
           sentBy: window.CURRENT_USER.uid,
           sentByName: window.CURRENT_USER.name || window.CURRENT_USER.email
         }
