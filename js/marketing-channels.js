@@ -79,6 +79,7 @@
             ${isAdmin() ? '<button class="btn btn-outline-secondary" onclick="window.MarketingChannels.syncExistingLeads()"><i class="bi bi-arrow-repeat me-1"></i>Sync Existing Leads</button>' : ''}
             <button class="btn btn-outline-secondary" onclick="window.MarketingChannels.openContactModal('${channel}')"><i class="bi bi-person-plus me-1"></i>Add Customer</button>
             <button class="btn btn-brand" onclick="window.MarketingChannels.openCampaignModal('${channel}')"><i class="bi bi-plus-lg me-1"></i>New Campaign</button>
+            <div class="small text-muted w-100 text-end">Shortcuts: <kbd>Alt + /</kbd> Add Customer · <kbd>Alt + O</kbd> Open Next</div>
           </div>
         </div>
         <div id="${channel}MarketingBody"></div>
@@ -303,7 +304,6 @@
     document.getElementById('marketingContactEmail').value = existing?.email || '';
     document.getElementById('marketingContactPhone').value = existing?.phone || '';
     document.getElementById('marketingContactCompany').value = existing?.company || '';
-    document.getElementById('marketingContactStatus').value = existing?.marketingStatus || 'Interested';
     document.getElementById('marketingContactChannel').value = channel;
     new bootstrap.Modal(document.getElementById('marketingContactModal')).show();
   }
@@ -317,7 +317,7 @@
       email: document.getElementById('marketingContactEmail').value.trim(),
       phone: document.getElementById('marketingContactPhone').value.trim(),
       company: document.getElementById('marketingContactCompany').value.trim(),
-      marketingStatus: cleanStatus(document.getElementById('marketingContactStatus').value),
+      marketingStatus: id ? cleanStatus((getState(channel).contacts.find(c => c.id === id)?.marketingStatus) || 'Interested') : 'Interested',
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedBy: window.CURRENT_USER.uid,
       updatedByName: window.CURRENT_USER.name || window.CURRENT_USER.email
@@ -445,7 +445,7 @@
     return String(text || '').replace(/\{\{\s*(name|email|phone|company)\s*\}\}/gi, (_, key) => values[key.toLowerCase()] ?? '');
   }
 
-  async function openMessage(channel, campaignId, contactId) {
+  async function openMessage(channel, campaignId, contactId, options = {}) {
     const campaign = getState(channel).campaigns.find(c => c.id === campaignId);
     const contact = getState(channel).contacts.find(c => c.id === contactId);
     if (!campaign || !contact) return;
@@ -483,19 +483,109 @@
       window.open(url, '_blank', 'noopener,noreferrer');
     }
 
+    const sentRecord = {
+      openedAt: new Date(),
+      sentThrough: channel === 'email' ? (campaign.emailProvider === 'Outlook' ? 'Outlook App' : 'Gmail') : 'WhatsApp',
+      sentBy: window.CURRENT_USER.uid,
+      sentByName: window.CURRENT_USER.name || window.CURRENT_USER.email
+    };
+    campaign.sentRecipients = { ...(campaign.sentRecipients || {}), [contactId]: sentRecord };
+    if (options.shortcutIndex && typeof toast === 'function') {
+      toast(`Lead no ${options.shortcutIndex}, customer name ${contact.name} is opened`, 'success');
+    }
+    renderChannel(channel);
+
     try {
-      const current = campaign.sentRecipients || {};
       await getCampaignRef(channel).doc(campaignId).update({
         [`sentRecipients.${contactId}`]: {
           openedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          sentThrough: channel === 'email' ? (campaign.emailProvider === 'Outlook' ? 'Outlook App' : 'Gmail') : 'WhatsApp',
-          sentBy: window.CURRENT_USER.uid,
-          sentByName: window.CURRENT_USER.name || window.CURRENT_USER.email
+          sentThrough: sentRecord.sentThrough,
+          sentBy: sentRecord.sentBy,
+          sentByName: sentRecord.sentByName
         }
       });
     } catch (err) {
       console.error('Failed to record marketing open:', err);
     }
+  }
+
+  function getVisibleMarketingChannel() {
+    const emailView = document.getElementById('view-emailmarketing');
+    const whatsappView = document.getElementById('view-whatsappmarketing');
+    if (emailView && !emailView.classList.contains('d-none')) return 'email';
+    if (whatsappView && !whatsappView.classList.contains('d-none')) return 'whatsapp';
+    return null;
+  }
+
+  function isModalVisible(id) {
+    const el = document.getElementById(id);
+    return !!el && el.classList.contains('show');
+  }
+
+  async function openNextRecipient(channel) {
+    const s = getState(channel);
+    const campaign = s.campaigns.find(c => c.id === s.activeCampaignId);
+    if (!campaign) {
+      if (typeof toast === 'function') toast(`Open a ${channel === 'email' ? 'email' : 'WhatsApp'} campaign first.`, 'warning');
+      return;
+    }
+
+    const recipients = eligibleContacts(channel);
+    const sentMap = campaign.sentRecipients || {};
+    const nextIndex = recipients.findIndex(contact => !sentMap[contact.id]);
+    if (nextIndex === -1) {
+      if (typeof toast === 'function') toast(`All ${recipients.length} ${channel === 'email' ? 'email' : 'WhatsApp'} leads in this campaign are opened.`, 'success');
+      return;
+    }
+
+    const contact = recipients[nextIndex];
+    await openMessage(channel, campaign.id, contact.id, { shortcutIndex: nextIndex + 1 });
+  }
+
+  function bindMarketingShortcuts() {
+    if (window.__marketingShortcutsBound) return;
+    window.__marketingShortcutsBound = true;
+
+    document.addEventListener('keydown', async (event) => {
+      const channel = getVisibleMarketingChannel();
+      if (!channel) return;
+
+      const target = event.target;
+      const tag = String(target?.tagName || '').toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable;
+
+      // Alt + / = open the Add Customer popup for the currently visible marketing section.
+      if (event.altKey && (event.key === '/' || event.code === 'Slash')) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!isModalVisible('marketingContactModal')) {
+          openContactModal(channel);
+        }
+        return;
+      }
+
+      // Alt + O = open the next unsent recipient in the currently open campaign.
+      if (event.altKey && (event.key === 'o' || event.key === 'O' || event.code === 'KeyO')) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!isTyping || !isModalVisible('marketingContactModal') && !isModalVisible('marketingCampaignModal')) {
+          await openNextRecipient(channel);
+        }
+        return;
+      }
+
+      // Enter submits the Add Customer form while the modal is open.
+      // Textareas are intentionally excluded so Enter can still create a new line.
+      if (event.key === 'Enter' && isModalVisible('marketingContactModal') && !event.shiftKey && tag !== 'textarea') {
+        const contactForm = document.querySelector('#marketingContactModal form');
+        if (contactForm && contactForm.contains(target)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof contactForm.requestSubmit === 'function') contactForm.requestSubmit();
+          else window.MarketingChannels.saveContact();
+        }
+      }
+    }, true);
   }
 
   async function refreshContacts() {
@@ -588,6 +678,8 @@
     }, { merge: true });
     if (contactCacheLoaded) await refreshContacts();
   }
+
+  bindMarketingShortcuts();
 
   window.MarketingChannels = {
     openView, setSearch, closeCampaign, openCampaign, openContactModal, saveContact, deleteContact,

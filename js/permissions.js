@@ -328,13 +328,6 @@
         ['hrTransfers.reject', 'Reject Transfer'],
         ['hrTransfers.assign', 'Assign HR']
       ] },
-      { title: 'Sales Academy', key: 'training', permissions: [
-        ['training.view', 'View Sales Academy'],
-        ['training.takeCourse', 'Take Courses'],
-        ['training.takeQuiz', 'Take Quizzes'],
-        ['training.manageCourses', 'Manage Courses'],
-        ['training.manageCategories', 'Manage Categories']
-      ] },
       { title: 'Team & System', key: 'manageTeam', permissions: [
         ['manageTeam.view', 'View Manage Team'],
         ['manageTeam.createUser', 'Create Users'],

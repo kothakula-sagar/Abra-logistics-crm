@@ -104,7 +104,6 @@ function buildNav() {
   const canViewReport = isSA || hasPermission("reports.view");
   const canViewLeave = isSA || hasPermission("leave.view");
   const canViewHRTransfers = isSA || hasPermission("hrTransfers.view");
-  const canViewTraining = isSA || hasPermission("training.view");
   const canViewAuditLog = isSA || hasPermission("auditLog.view");
   const canViewUsers = isSA || hasPermission("manageTeam.view");
   const canViewCampaigns = isSA || hasPermission("campaignManagement.view");
@@ -112,8 +111,8 @@ function buildNav() {
   const canViewCRMSettings = isSA || hasPermission("crmSettings.view");
   const canViewAISettings = isSA || hasPermission("aiSettings.view");
   const canViewPermissions = isSA;
-  const canViewEmailMarketing = isSA || hasPermission("emailMarketing.view");
-  const canViewWhatsAppMarketing = isSA || hasPermission("whatsappMarketing.view");
+  const canViewEmailMarketing = !!CURRENT_USER?.active;
+  const canViewWhatsAppMarketing = !!CURRENT_USER?.active;
 
   let html = "";
 
@@ -177,14 +176,6 @@ function buildNav() {
     html += `
     <a href="#" class="nav-link nav-item-link" data-view="hrtransfers">
       <i class="bi bi-arrow-left-right"></i> HR Transfers
-    </a>`;
-  }
-
-  if (canViewTraining) {
-    html += `
-    <a href="#" class="nav-link nav-item-link" data-view="training">
-      <i class="bi bi-mortarboard-fill"></i> Sales Academy
-      ${CURRENT_USER.role === "member" ? '<span id="trainingProgressBadge" class="badge bg-info ms-auto d-none"></span>' : ''}
     </a>`;
   }
 
@@ -398,18 +389,6 @@ function showView(viewName) {
         loadTelegramView();
       } else {
         console.error("Telegram renderer is not loaded: telegram.js");
-      }
-    }
-
-    if (viewName === "training") {
-      if (typeof loadTrainingView === "function") {
-        loadTrainingView();
-      } else {
-        console.error("Sales Academy module (training.js) not loaded");
-        const container = document.getElementById("trainingContentArea");
-        if (container) {
-          container.innerHTML = '<div class="alert alert-danger">Sales Academy module failed to load. Please refresh the page.</div>';
-        }
       }
     }
 

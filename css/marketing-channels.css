@@ -27,3 +27,14 @@
 .marketing-table td { font-size:.88rem; }
 @media (max-width: 900px) { .marketing-stats-row { grid-template-columns:1fr; } }
 @media (max-width: 640px) { .marketing-campaign-grid { grid-template-columns:1fr; } .marketing-search { max-width:none; } }
+
+.marketing-channel-header kbd {
+  padding: .12rem .35rem;
+  border: 1px solid #d9dee7;
+  border-bottom-width: 2px;
+  border-radius: .3rem;
+  background: #f8fafc;
+  color: #334155;
+  font-size: .72rem;
+  font-family: inherit;
+}
