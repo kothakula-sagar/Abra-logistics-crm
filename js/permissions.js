@@ -104,6 +104,28 @@
       crmSettings: { view: true, edit: false },
       aiSettings: { view: true, editOwn: true },
       permissionSettings: { view: false, edit: false }
+    },
+    marketing: {
+      dashboard: { view: true },
+      leads: { view: false, viewAll: false, create: false, edit: false, changeStatus: false, assign: false, reassign: false, viewHistory: false, delete: false },
+      followups: { view: false },
+      urgent: { view: false },
+      callAudit: { view: false, submit: false, approve: false, reject: false, recall: false, viewRecording: false },
+      reports: { view: false, export: false },
+      emailMarketing: { view: true },
+      whatsappMarketing: { view: true },
+      customers: { view: true },
+      docs: { view: false },
+      leave: { view: false, apply: false, cancelOwn: false, viewAll: false, approve: false, reject: false },
+      hrTransfers: { view: false, request: false, approve: false, reject: false, assign: false, viewHistory: false },
+      training: { view: false, takeCourse: false, takeQuiz: false, viewCertificate: false, manageCourses: false, manageCategories: false, viewTeamProgress: false },
+      auditLog: { view: false },
+      manageTeam: { view: false, createUser: false, changeRole: false, activateDeactivate: false },
+      campaignManagement: { view: false, create: false, edit: false, activateDeactivate: false, archive: false },
+      campaignReports: { view: false, export: false },
+      crmSettings: { view: false, edit: false },
+      aiSettings: { view: false, editOwn: false },
+      permissionSettings: { view: false, edit: false }
     }
   };
 
@@ -246,7 +268,8 @@
     const payload = {
       admin: state.admin || {},
       member: state.member || {},
-      hr: state.hr || {}
+      hr: state.hr || {},
+      marketing: state.marketing || {}
     };
 
     if (typeof window.toast === 'function') window.toast('Saving permission settings...', 'info');
@@ -270,7 +293,8 @@
     const payload = {
       admin: clone(DEFAULT_PERMISSIONS.admin),
       member: clone(DEFAULT_PERMISSIONS.member),
-      hr: clone(DEFAULT_PERMISSIONS.hr)
+      hr: clone(DEFAULT_PERMISSIONS.hr),
+      marketing: clone(DEFAULT_PERMISSIONS.marketing)
     };
 
     return ref.set(payload, { merge: true }).then(() => {
@@ -402,6 +426,7 @@
             ${renderCell('admin')}
             ${renderCell('member')}
             ${renderCell('hr')}
+            ${renderCell('marketing')}
           </tr>`;
       }).join('');
 
@@ -417,6 +442,7 @@
                     <th>Admin</th>
                     <th>Sales Member</th>
                     <th>HR</th>
+                    <th>Marketing</th>
                   </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -430,7 +456,7 @@
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
         <div>
           <h1 class="page-title"><i class="bi bi-shield-lock me-2"></i>Permission Settings</h1>
-          <p class="page-subtitle">Manage module access and action permissions for Admin, Sales Member, and HR roles.</p>
+          <p class="page-subtitle">Manage module access and action permissions for Admin, Sales Member, HR, and Marketing roles.</p>
         </div>
         <div class="d-flex gap-2">
           <button class="btn btn-outline-secondary" onclick="resetPermissionSettings()"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset to Defaults</button>

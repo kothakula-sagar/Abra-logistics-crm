@@ -22,9 +22,9 @@
   };
   const statusOf = (c, channel) => {
     const value = channel === 'whatsapp' ? c.whatsappStatus : c.emailStatus;
-    if (value) return value === 'Not Interested' ? 'Not Interested' : 'Interested';
-    if (c.marketingStatus) return c.marketingStatus === 'Not Interested' ? 'Not Interested' : 'Interested';
-    return 'Interested';
+    if (value) return ['Not Interested','Unsubscribed'].includes(value) ? 'Unsubscribed' : 'Subscribed';
+    if (c.marketingStatus) return ['Not Interested','Unsubscribed'].includes(c.marketingStatus) ? 'Unsubscribed' : 'Subscribed';
+    return 'Subscribed';
   };
 
   function render() {
@@ -46,8 +46,8 @@
       </div>
       <div class="row g-2 mb-3">
         <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Total Customers</span><strong>${customers.length}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>WhatsApp Interested</span><strong>${customers.filter(c=>statusOf(c,'whatsapp')==='Interested').length}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Email Interested</span><strong>${customers.filter(c=>statusOf(c,'email')==='Interested').length}</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>WhatsApp Subscribed</span><strong>${customers.filter(c=>statusOf(c,'whatsapp')==='Subscribed').length}</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Email Subscribed</span><strong>${customers.filter(c=>statusOf(c,'email')==='Subscribed').length}</strong></div></div>
         <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Manual Customers</span><strong>${customers.filter(c=>c.source!=='lead').length}</strong></div></div>
       </div>
       <div class="marketing-card">
@@ -76,8 +76,8 @@
       <td>${esc(c.email || '—')}</td>
       <td>${esc(c.phone || '—')}</td>
       <td>${esc(c.company || '—')}</td>
-      <td><select class="form-select form-select-sm customer-status-select ${wa==='Not Interested'?'border-danger':''}" onchange="window.Customers.setStatus('${c.id}','whatsapp',this.value)"><option ${wa==='Interested'?'selected':''}>Interested</option><option ${wa==='Not Interested'?'selected':''}>Not Interested</option></select></td>
-      <td><select class="form-select form-select-sm customer-status-select ${em==='Not Interested'?'border-danger':''}" onchange="window.Customers.setStatus('${c.id}','email',this.value)"><option ${em==='Interested'?'selected':''}>Interested</option><option ${em==='Not Interested'?'selected':''}>Not Interested</option></select></td>
+      <td><select class="form-select form-select-sm customer-status-select ${wa==='Unsubscribed'?'border-danger':''}" onchange="window.Customers.setStatus('${c.id}','whatsapp',this.value)"><option ${wa==='Subscribed'?'selected':''}>Subscribed</option><option ${wa==='Unsubscribed'?'selected':''}>Unsubscribed</option></select></td>
+      <td><select class="form-select form-select-sm customer-status-select ${em==='Unsubscribed'?'border-danger':''}" onchange="window.Customers.setStatus('${c.id}','email',this.value)"><option ${em==='Subscribed'?'selected':''}>Subscribed</option><option ${em==='Unsubscribed'?'selected':''}>Unsubscribed</option></select></td>
       <td><span class="badge bg-light text-dark">${esc(source)}</span></td>
       <td><div class="d-flex gap-1">${canEdit()?`<button class="btn btn-sm btn-outline-secondary" onclick="window.MarketingChannels.openContactModal('email','${c.id}')">Edit</button>`:''}${isAdmin()?`<button class="btn btn-sm btn-outline-danger" onclick="window.Customers.delete('${c.id}')">Delete</button>`:''}</div></td>
       <td>${esc(addedBy)}</td>
@@ -102,11 +102,11 @@
     const payload = { updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: CURRENT_USER.uid, updatedByName: CURRENT_USER.name || CURRENT_USER.email };
     if (channel === 'whatsapp') payload.whatsappStatus = value; else payload.emailStatus = value;
     // Keep the legacy field for older screens/data, but channel-specific status is authoritative.
-    if (value === 'Not Interested') payload.marketingStatus = 'Not Interested';
+    if (value === 'Unsubscribed') payload.marketingStatus = 'Unsubscribed';
     else {
       const c = customers.find(x=>x.id===id);
       const other = channel === 'whatsapp' ? statusOf(c||{},'email') : statusOf(c||{},'whatsapp');
-      payload.marketingStatus = other === 'Not Interested' ? 'Not Interested' : 'Interested';
+      payload.marketingStatus = other === 'Unsubscribed' ? 'Unsubscribed' : 'Subscribed';
     }
     try {
       await ref().doc(id).update(payload);

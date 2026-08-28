@@ -9,7 +9,8 @@ const ROLE_LABELS = {
   superadmin: "Super Admin",
   admin: "Admin",
   member: "Sales Member",
-  hr: "HR"
+  hr: "HR",
+  marketing: "Marketing"
 };
 
 async function initApp() {
@@ -48,7 +49,9 @@ async function initApp() {
     await migratePendingAssignmentLeadState();
     await assignPendingLeads();
   }
-  await loadLeadsView();
+  if (CURRENT_USER.role !== "marketing") {
+    await loadLeadsView();
+  }
 
   if (CURRENT_USER.role === "superadmin") {
     await loadUsersView();
@@ -111,12 +114,32 @@ function buildNav() {
   const canViewCRMSettings = isSA || hasPermission("crmSettings.view");
   const canViewAISettings = isSA || hasPermission("aiSettings.view");
   const canViewPermissions = isSA;
-  const canViewEmailMarketing = !!CURRENT_USER?.active;
-  const canViewWhatsAppMarketing = !!CURRENT_USER?.active;
-  const canViewCustomers = !!CURRENT_USER?.active;
-  const canViewDocs = !!CURRENT_USER?.active;
+  const isMarketingRole = CURRENT_USER?.role === "marketing";
+  const canViewEmailMarketing = isMarketingRole || hasPermission("emailMarketing.view");
+  const canViewWhatsAppMarketing = isMarketingRole || hasPermission("whatsappMarketing.view");
+  const canViewCustomers = isMarketingRole || hasPermission("customers.view");
+  const canViewDocs = !isMarketingRole && !!CURRENT_USER?.active;
 
   let html = "";
+
+  // Marketing role is intentionally limited to the four requested modules.
+  if (CURRENT_USER?.role === "marketing") {
+    html += `
+      <a href="#" class="nav-link nav-item-link" data-view="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a href="#" class="nav-link nav-item-link" data-view="customers"><i class="bi bi-people"></i> Customers</a>
+      <a href="#" class="nav-link nav-item-link" data-view="emailmarketing"><i class="bi bi-envelope-at"></i> Email Marketing</a>
+      <a href="#" class="nav-link nav-item-link" data-view="whatsappmarketing"><i class="bi bi-whatsapp"></i> WhatsApp Marketing</a>`;
+    nav.innerHTML = html;
+    document.querySelectorAll(".nav-item-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.querySelectorAll(".nav-item-link").forEach((l) => l.classList.remove("active"));
+        link.classList.add("active");
+        showView(link.dataset.view);
+      });
+    });
+    return;
+  }
 
   // Telegram is available to every authenticated CRM user.
   html += `
@@ -273,6 +296,7 @@ function buildNav() {
 function canAccessView(viewName) {
   if (!viewName) return false;
   if (CURRENT_USER && CURRENT_USER.role === "superadmin") return true;
+  if (CURRENT_USER?.role === "marketing") return ["dashboard", "customers", "emailmarketing", "whatsappmarketing"].includes(viewName);
   if (CURRENT_USER?.active && ["dashboard", "customers", "docs", "emailmarketing", "whatsappmarketing"].includes(viewName)) return true;
   const requiredPermission = window.PERMISSION_VIEW_PATHS && window.PERMISSION_VIEW_PATHS[viewName];
   return !requiredPermission || hasPermission(requiredPermission);

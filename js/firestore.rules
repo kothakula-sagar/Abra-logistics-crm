@@ -64,6 +64,10 @@ service cloud.firestore {
       return isSignedIn() && myRole() == 'hr';
     }
 
+    function isMarketing() {
+      return isSignedIn() && myRole() == 'marketing';
+    }
+
     function isStaff() {
       return isSuperAdmin() || isAdmin();
     }
@@ -549,8 +553,10 @@ service cloud.firestore {
     // MARKETING CONTACTS + CHANNEL CAMPAIGNS
     // ============================================================
     //
-    // All active CRM users can view/edit marketing customers and
-    // create/edit campaigns. Admin + Super Admin can delete.
+    // All active CRM users can view/add/edit marketing customers and
+    // change channel subscription status. Admin + Super Admin can delete.
+    // Email/WhatsApp campaign data is restricted to Super Admin, Admin,
+    // and Marketing roles.
     // The client uses this small contact cache instead of issuing
     // another full /leads query every time a marketing screen opens.
     // ============================================================
@@ -563,16 +569,12 @@ service cloud.firestore {
     }
 
     match /emailMarketingCampaigns/{campaignId} {
-      allow read, create, update: if isSignedIn()
-        && myUserDoc().data.active == true;
-
+      allow read, create, update: if isStaff() || isMarketing();
       allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /whatsappMarketingCampaigns/{campaignId} {
-      allow read, create, update: if isSignedIn()
-        && myUserDoc().data.active == true;
-
+      allow read, create, update: if isStaff() || isMarketing();
       allow delete: if isAdmin() || isSuperAdmin();
     }
 

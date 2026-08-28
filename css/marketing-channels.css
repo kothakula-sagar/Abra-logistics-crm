@@ -44,3 +44,5 @@
 .marketing-recipients-scroll{max-height:520px;overflow:auto}
 .marketing-campaigns-scroll thead th,.marketing-recipients-scroll thead th{position:sticky;top:0;z-index:2;background:#f8fafc;box-shadow:0 1px 0 #e8edf2}
 .marketing-campaigns-scroll table,.marketing-recipients-scroll table{min-width:900px}
+
+.whatsapp-countdown{display:inline-block;margin-left:.6rem;color:#dc2626;font-size:.9rem;font-weight:800;}

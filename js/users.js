@@ -27,7 +27,7 @@ function renderUsersTable() {
     <tr>
       <td>${escapeHtml(u.name)}</td>
       <td>${escapeHtml(u.email)}</td>
-      <td><span class="badge ${u.role === "superadmin" ? "bg-dark" : u.role === "admin" ? "bg-primary" : u.role === "hr" ? "bg-info text-dark" : "bg-secondary"}">${ROLE_LABELS[u.role] || u.role}</span></td>
+      <td><span class="badge ${u.role === "superadmin" ? "bg-dark" : u.role === "admin" ? "bg-primary" : u.role === "hr" ? "bg-info text-dark" : u.role === "marketing" ? "bg-warning text-dark" : "bg-secondary"}">${ROLE_LABELS[u.role] || u.role}</span></td>
       <td>${u.active === false ? '<span class="badge bg-danger">Inactive</span>' : '<span class="badge bg-success">Active</span>'}</td>
       <td>${u.telegramConnected ? '<span class="badge bg-success"><i class="bi bi-telegram me-1"></i>Connected</span>' : '<span class="badge bg-secondary">Not connected</span>'}</td>
       <td class="text-nowrap">
@@ -36,6 +36,7 @@ function renderUsersTable() {
             <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
             <option value="member" ${u.role === "member" ? "selected" : ""}>Sales Member</option>
             <option value="hr" ${u.role === "hr" ? "selected" : ""}>HR</option>
+            <option value="marketing" ${u.role === "marketing" ? "selected" : ""}>Marketing</option>
           </select>
           <button class="btn btn-sm ${u.active === false ? "btn-outline-success" : "btn-outline-warning"}" onclick="toggleUserActive('${u.id}', ${u.active === false})">
             ${u.active === false ? "Activate" : "Deactivate"}
