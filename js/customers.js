@@ -6,7 +6,7 @@
 (function () {
   'use strict';
   const getCustomersPageScroller = () => document.querySelector('.main-content') || document.scrollingElement || document.documentElement;
-  const getCustomersPageScrollTop = () => getCustomersPageScroller()?.scrollTop || 0;
+  const getCustomersPageScrollTop = () => getCustomersPageScroller()?.scrollTop ?? 0;
   const setCustomersPageScrollTop = (top) => { const el=getCustomersPageScroller(); if(el && Number.isFinite(top)) el.scrollTop=top; };
 
   let search = '';
@@ -41,7 +41,7 @@
     // Preserve the user's position while the shared customer snapshot updates.
     // A realtime listener should add/update rows without throwing the user back to row 1.
     const existingTable = body.querySelector('.customers-table-scroll');
-    const savedTableScrollTop = existingTable ? existingTable.scrollTop : 0;
+    const savedTableScrollTop = existingTable ? (existingTable.scrollTop ?? 0) : 0;
     const savedPageScrollTop = getCustomersPageScrollTop();
 
     const customers = getCustomers();
@@ -126,8 +126,7 @@
 
   async function init() {
     if (!isActive()) return;
-    if (unsubscribeStore) unsubscribeStore();
-    if (window.MarketingChannels?.onContactsChange) {
+    if (!unsubscribeStore && window.MarketingChannels?.onContactsChange) {
       unsubscribeStore = window.MarketingChannels.onContactsChange(() => render());
     }
     await window.MarketingChannels?.ensureContactsLoaded?.();
