@@ -70,25 +70,66 @@ if (addUserForm) {
     try {
       secondaryApp = firebase.initializeApp(window.firebaseConfig, "Secondary-" + Date.now());
 
-      const cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
-      const newUid = cred.user.uid;
+      let newUid = null;
+      let existingAuthAccount = false;
 
-      await usersRef.doc(newUid).set({
-        name,
-        email,
-        role,
-        active: true,
-        createdBy: CURRENT_USER.uid,
-        createdAt: firebase.firestore.Timestamp.now()
-      });
+      try {
+        // New Firebase Auth account.
+        const cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
+        newUid = cred.user.uid;
+      } catch (authErr) {
+        // The Auth account may already exist because the person registered
+        // previously. In that case, provision the existing Auth UID instead
+        // of trying to create a duplicate account. The server uses the
+        // Super Admin's ID token and Firebase Admin SDK to resolve the UID.
+        if (authErr.code !== "auth/email-already-in-use") throw authErr;
 
-      await secondaryApp.auth().signOut();
-      await secondaryApp.delete();
-      secondaryApp = null;
+        const idToken = await auth.currentUser.getIdToken(true);
+        const response = await fetch(`${window.CRM_API_BASE || ""}/api/admin/provision-existing-user`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ name, email, role })
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok || !result.uid) {
+          const error = new Error(result.error || "Unable to provision the existing Firebase account.");
+          error.code = "crm/provision-failed";
+          throw error;
+        }
+
+        newUid = result.uid;
+        existingAuthAccount = true;
+      }
+
+      if (!existingAuthAccount) {
+        await usersRef.doc(newUid).set({
+          name,
+          email,
+          role,
+          active: true,
+          createdBy: CURRENT_USER.uid,
+          createdAt: firebase.firestore.Timestamp.now()
+        });
+      }
+
+      if (secondaryApp) {
+        await secondaryApp.auth().signOut();
+        await secondaryApp.delete();
+        secondaryApp = null;
+      }
 
       addUserForm.reset();
       bootstrap.Modal.getInstance(document.getElementById("addUserModal")).hide();
-      toast(`${ROLE_LABELS[role]} account created for ${name}.`, "success");
+      toast(
+        existingAuthAccount
+          ? `${ROLE_LABELS[role]} access enabled for existing account ${name}. They can now sign in with their existing password.`
+          : `${ROLE_LABELS[role]} account created for ${name}.`,
+        "success"
+      );
       await refreshActiveMembers();
       if (typeof refreshActiveHR === "function") await refreshActiveHR();
     } catch (err) {

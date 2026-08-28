@@ -3061,6 +3061,89 @@ app.post(
 
 
 // ============================================================
+// PROVISION AN EXISTING FIREBASE AUTH ACCOUNT
+// ============================================================
+// A team member may already exist in Firebase Authentication.
+// The browser cannot resolve another user's Auth UID by email, so the
+// Super Admin's authenticated request is handled here with Firebase Admin.
+app.post(
+  '/api/admin/provision-existing-user',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      if (req.crmUser?.role !== 'superadmin') {
+        return res.status(403).json({
+          ok: false,
+          error: 'Only the Super Admin can provision an existing account.'
+        });
+      }
+
+      const name = String(req.body?.name || '').trim();
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const role = String(req.body?.role || 'member').trim().toLowerCase();
+
+      const allowedRoles = new Set(['admin', 'member', 'hr', 'marketing']);
+
+      if (!name || !email || !allowedRoles.has(role)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Name, valid email, and role are required.'
+        });
+      }
+
+      let authUser;
+      try {
+        authUser = await admin.auth().getUserByEmail(email);
+      } catch (error) {
+        if (error?.code === 'auth/user-not-found') {
+          return res.status(404).json({
+            ok: false,
+            error: 'No Firebase Authentication account was found for this email.'
+          });
+        }
+        throw error;
+      }
+
+      const userRef = db.collection('users').doc(authUser.uid);
+      const existing = await userRef.get();
+      const now = FieldValue.serverTimestamp();
+
+      const profile = {
+        name,
+        email: authUser.email || email,
+        role,
+        active: true,
+        updatedAt: now
+      };
+
+      if (!existing.exists) {
+        profile.createdBy = req.firebaseUser.uid;
+        profile.createdAt = now;
+      }
+
+      await userRef.set(profile, { merge: true });
+      clearUserCache(authUser.uid);
+
+      return res.json({
+        ok: true,
+        uid: authUser.uid,
+        existed: existing.exists,
+        message: existing.exists
+          ? 'Existing CRM profile updated.'
+          : 'Existing Firebase account provisioned into the CRM.'
+      });
+    } catch (error) {
+      console.error('Provision existing user error:', error);
+      return res.status(500).json({
+        ok: false,
+        error: publicFirebaseError(error)
+      });
+    }
+  }
+);
+
+
+// ============================================================
 // HEALTH CHECK
 // ============================================================
 
