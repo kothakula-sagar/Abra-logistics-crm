@@ -62,6 +62,9 @@ function _defaultConfig() {
     dateFormat:  "DD MMM YYYY",
     timeFormat:  "12h",
     currency:    "INR",
+    // § 11 Global CRM Font
+    fontFamily:  "Inter",
+    fontGoogleUrl: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
   };
 }
 
@@ -83,6 +86,8 @@ function subscribeCRMSettings() {
       // Merge Firestore data over defaults so new keys always have a value
       CRM_CONFIG = { ..._defaultConfig(), ...snap.data() };
     }
+    // Apply the shared CRM font immediately for every role.
+    applyCRMFont(CRM_CONFIG.fontGoogleUrl, CRM_CONFIG.fontFamily);
     // If the settings page is currently visible, re-render it
     const section = document.getElementById("view-crmsettings");
     if (section && !section.classList.contains("d-none")) {
@@ -139,8 +144,10 @@ function renderCRMSettingsView() {
   if (!wrap) return;
 
   const isSA       = CURRENT_USER.role === "superadmin";
-  const isReadOnly = !isSA;          // Admin and Member both see read-only
-  const ro         = isReadOnly ? "disabled" : "";   // HTML attribute string
+  const isAdmin     = CURRENT_USER.role === "admin";
+  const canEditFont = isSA || isAdmin;
+  const isReadOnly  = !isSA;          // Business settings remain Super Admin-only
+  const ro          = isReadOnly ? "disabled" : "";   // HTML attribute string
 
   const g  = CRM_CONFIG;
   const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -153,7 +160,9 @@ function renderCRMSettingsView() {
       <p class="page-subtitle">
         ${isSA
           ? "All business rules. Changes take effect for every user in real time."
-          : "Current CRM configuration — read-only for your role."}
+          : (isAdmin
+            ? "Business rules are read-only for Admin. Global CRM font can be changed here."
+            : "Current CRM configuration — read-only for your role.")}
       </p>
     </div>
     ${isSA ? `
@@ -170,11 +179,12 @@ function renderCRMSettingsView() {
   ${isReadOnly ? `
   <div class="alert crm-readonly-alert mb-4" role="alert">
     <i class="bi bi-info-circle-fill me-2"></i>
-    These settings are managed by the Super Admin. You can view all values but cannot modify them.
+    Business settings are managed by the Super Admin. Admin can change only the Global CRM Font.
   </div>` : ""}
 
   <div class="row g-4">
     <div class="col-12 col-xl-6">
+      ${_card("bi-type",            "Global CRM Font",       _sectionGlobalFont(g, canEditFont))}
       ${_card("bi-calendar-week", "Working Days",   _sectionWorkingDays(DAYS, g, ro))}
       ${_card("bi-clock",         "Office Hours",   _sectionOfficeHours(g, ro))}
       ${_card("bi-cup-hot",       "Break Timings",  _sectionBreaks(g, ro, isSA))}
@@ -199,6 +209,8 @@ function renderCRMSettingsView() {
       <i class="bi bi-arrow-counterclockwise me-1"></i>Discard Changes
     </button>
   </div>` : ""}`;
+
+  _bindCRMFontPreview();
 }
 
 // ── Section builders (each returns an HTML string) ───────────
@@ -209,6 +221,49 @@ function _card(icon, title, body) {
     <div class="crm-settings-card-header"><i class="bi ${icon} me-2"></i>${title}</div>
     <div class="crm-settings-card-body">${body}</div>
   </div>`;
+}
+
+function _sectionGlobalFont(g, canEditFont) {
+  const disabled = canEditFont ? "" : "disabled";
+  const family = g.fontFamily || "Inter";
+  const googleUrl = g.fontGoogleUrl || "";
+  return `
+  <div class="mb-3">
+    <label class="form-label small fw-semibold">Google Fonts embed code or CSS URL</label>
+    <textarea id="cfg_fontGoogleInput" class="form-control" rows="3" ${disabled}
+      placeholder="Paste the <link ...> code or https://fonts.googleapis.com/css2?...">${escapeHtml(googleUrl)}</textarea>
+    <div class="form-text">
+      In Google Fonts, choose a font, open <strong>Get embed code</strong>, then paste the <code>&lt;link&gt;</code> code here.
+      The CRM extracts the font family automatically.
+    </div>
+  </div>
+  <div class="row g-3 align-items-end">
+    <div class="col-md-7">
+      <label class="form-label small fw-semibold">Font Family</label>
+      <input id="cfg_fontFamily" class="form-control" value="${escapeHtml(family)}" ${disabled}
+        placeholder="Inter">
+      <div class="form-text">Used across the CRM, including headings, tables, buttons and forms.</div>
+    </div>
+    <div class="col-md-5">
+      <div class="p-3 rounded border bg-light" id="crmFontPreview" style="font-family: '${escapeHtml(family).replace(/'/g, "&#39;")}';">
+        <div class="small text-muted mb-1">Preview</div>
+        <div style="font-size:1.15rem;font-weight:700;">Abra Logistics CRM</div>
+        <div class="small">Customer • Marketing • Reports • Settings</div>
+      </div>
+    </div>
+  </div>
+  ${canEditFont ? `
+  <div class="mt-3 d-flex flex-wrap gap-2">
+    <button type="button" class="btn btn-brand" onclick="saveCRMFont()">
+      <i class="bi bi-check2-circle me-1"></i>Save / Update Font
+    </button>
+    <button type="button" class="btn btn-outline-secondary" onclick="resetCRMFontToDefault()">
+      <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to Inter
+    </button>
+  </div>` : `
+  <div class="alert alert-light border mb-0 mt-3 py-2 small">
+    <i class="bi bi-lock-fill me-1"></i>Only Super Admin and Admin can change the CRM font.
+  </div>`}`;
 }
 
 function _sectionWorkingDays(DAYS, g, ro) {
@@ -443,6 +498,138 @@ function addHolidayRow() {
 function deleteHolidayRow(id) {
   CRM_CONFIG.holidays = (CRM_CONFIG.holidays || []).filter(h => h.id !== id);
   renderCRMSettingsView();
+}
+
+function _extractGoogleFontUrl(input) {
+  let value = String(input || "").trim();
+  if (!value) return "";
+
+  // Accept the complete Google Fonts <link> snippet.
+  const hrefMatch = value.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*>/i);
+  if (hrefMatch) value = hrefMatch[1];
+
+  // Accept CSS @import url("...") snippets as well.
+  const importMatch = value.match(/@import\s+url\(\s*["']?([^"')]+)["']?\s*\)/i);
+  if (importMatch) value = importMatch[1];
+
+  // Decode the common HTML entity produced by copied embed code.
+  value = value.replace(/&amp;/gi, "&").trim();
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.protocol !== "https:" || url.hostname !== "fonts.googleapis.com") return "";
+    return url.toString();
+  } catch (_) {
+    return "";
+  }
+}
+
+function _extractGoogleFontFamily(url) {
+  try {
+    const u = new URL(url);
+    const family = u.searchParams.get("family");
+    if (!family) return "";
+    // If multiple families were supplied, use the first one.
+    const first = family.split("&family=")[0].split(":")[0];
+    return decodeURIComponent(first.replace(/\+/g, " ")).trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function _safeFontFamily(value) {
+  const cleaned = String(value || "").trim().replace(/[{}<>;\"`]/g, "");
+  return cleaned || "Inter";
+}
+
+function applyCRMFont(googleUrl, family) {
+  const safeFamily = _safeFontFamily(family);
+  const root = document.documentElement;
+  root.style.setProperty("--crm-font-family", `"${safeFamily}", sans-serif`);
+
+  let link = document.getElementById("crmDynamicGoogleFont");
+  const safeUrl = _extractGoogleFontUrl(googleUrl);
+  if (!safeUrl) return;
+  if (!link) {
+    link = document.createElement("link");
+    link.id = "crmDynamicGoogleFont";
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+  }
+  if (link.href !== safeUrl) link.href = safeUrl;
+}
+
+function updateCRMFontPreview() {
+  const familyInput = document.getElementById("cfg_fontFamily");
+  const preview = document.getElementById("crmFontPreview");
+  if (!familyInput || !preview) return;
+  const family = _safeFontFamily(familyInput.value);
+  preview.style.fontFamily = `"${family}", sans-serif`;
+}
+
+function _bindCRMFontPreview() {
+  const input = document.getElementById("cfg_fontGoogleInput");
+  const familyInput = document.getElementById("cfg_fontFamily");
+  if (input) {
+    input.addEventListener("blur", () => {
+      const url = _extractGoogleFontUrl(input.value);
+      if (!url) return;
+      const family = _extractGoogleFontFamily(url);
+      if (familyInput && family) familyInput.value = family;
+      updateCRMFontPreview();
+      applyCRMFont(url, family || familyInput?.value || "Inter");
+    });
+  }
+  if (familyInput) familyInput.addEventListener("input", updateCRMFontPreview);
+}
+
+async function saveCRMFont() {
+  const role = CURRENT_USER?.role;
+  if (!(role === "superadmin" || role === "admin")) {
+    toast("Only Super Admin or Admin can change the CRM font.", "danger");
+    return;
+  }
+
+  const input = document.getElementById("cfg_fontGoogleInput")?.value || "";
+  const manualFamily = _safeFontFamily(document.getElementById("cfg_fontFamily")?.value || "Inter");
+  const googleUrl = _extractGoogleFontUrl(input);
+  if (!googleUrl) {
+    toast("Paste a valid Google Fonts embed code or fonts.googleapis.com CSS URL.", "warning");
+    return;
+  }
+
+  const extractedFamily = _extractGoogleFontFamily(googleUrl);
+  const fontFamily = _safeFontFamily(extractedFamily || manualFamily);
+  const btn = document.querySelector('[onclick="saveCRMFont()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving…'; }
+
+  try {
+    await CRM_SETTINGS_DOC.set({ fontFamily, fontGoogleUrl: googleUrl }, { merge: true });
+    applyCRMFont(googleUrl, fontFamily);
+    toast(`CRM font updated to ${fontFamily}.`, "success");
+  } catch (err) {
+    console.error("Save CRM font failed:", err);
+    toast("Failed to update CRM font. Please try again.", "danger");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Save / Update Font'; }
+  }
+}
+
+async function resetCRMFontToDefault() {
+  const role = CURRENT_USER?.role;
+  if (!(role === "superadmin" || role === "admin")) {
+    toast("Only Super Admin or Admin can change the CRM font.", "danger");
+    return;
+  }
+  const googleUrl = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
+  try {
+    await CRM_SETTINGS_DOC.set({ fontFamily: "Inter", fontGoogleUrl: googleUrl }, { merge: true });
+    applyCRMFont(googleUrl, "Inter");
+    toast("CRM font reset to Inter.", "success");
+  } catch (err) {
+    console.error("Reset CRM font failed:", err);
+    toast("Failed to reset CRM font.", "danger");
+  }
 }
 
 // ── Save (Super Admin only) ───────────────────────────────────

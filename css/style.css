@@ -1,4 +1,5 @@
 :root {
+  --crm-font-family: "Inter", sans-serif;
   --navy: #0F2C46;
   --navy-dark: #091C2E;
   --steel: #3E6D9C;
@@ -13,14 +14,14 @@
 * { box-sizing: border-box; }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--crm-font-family);
   background: var(--slate-bg);
   color: var(--text-dark);
   margin: 0;
 }
 
 h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
 }
 
 /* ---------------- AUTH PAGES ---------------- */
@@ -50,7 +51,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
   color: var(--amber);
   border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-weight: 700;
   font-size: 15px;
 }
@@ -199,7 +200,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 .report-stat-total { background: var(--navy); border-color: var(--navy); }
 .report-stat-total .report-stat-value,
 .report-stat-total .report-stat-label { color: #fff; }
-.report-stat-value { font-family: 'Space Grotesk', sans-serif; font-size: 24px; font-weight: 700; color: var(--navy); line-height: 1.1; }
+.report-stat-value { font-family: var(--crm-font-family); font-size: 24px; font-weight: 700; color: var(--navy); line-height: 1.1; }
 .report-stat-label { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 
 .report-message-box {
@@ -207,7 +208,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   padding: 16px;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--crm-font-family);
   font-size: 13.5px;
   white-space: pre-wrap;
   color: var(--text-dark);
@@ -258,7 +259,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
   padding: 18px 24px 14px;
 }
 .pitch-modal-header .modal-title {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-size: 17px;
   font-weight: 700;
   color: #fff;
@@ -376,7 +377,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 .ai-settings-card-header {
   background: linear-gradient(135deg, var(--navy-dark) 0%, #6339B5 100%);
   color: #fff;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-weight: 600;
   font-size: 14px;
   padding: 14px 20px;
@@ -513,7 +514,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
   border: 1px solid var(--border-soft);
 }
 .urgent-empty-icon  { font-size: 48px; line-height: 1; margin-bottom: 12px; }
-.urgent-empty-title { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+.urgent-empty-title { font-family: var(--crm-font-family); font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
 .urgent-empty-sub   { font-size: 13.5px; color: var(--text-muted); }
 
 /* ── Card base ─────────────────────────────────────────────── */
@@ -668,7 +669,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 .crm-settings-card-header {
   background: linear-gradient(135deg, var(--navy) 0%, var(--steel) 100%);
   color: #fff;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-weight: 600;
   font-size: 13.5px;
   padding: 12px 18px;
@@ -822,7 +823,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 .dash-stat-card:hover { box-shadow: 0 4px 16px rgba(15,44,70,0.10); }
 .dash-stat-icon { font-size: 22px; margin-bottom: 8px; }
 .dash-stat-value {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-size: 28px;
   font-weight: 700;
   line-height: 1;
@@ -1089,7 +1090,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
   margin-bottom: 8px;
 }
 .field-builder-index {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-weight: 700;
   font-size: 12.5px;
   color: var(--steel);
@@ -1219,7 +1220,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 
 /* Follow-up card with countdown/overdue timer */
 .followup-timer {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-weight: 700;
   font-size: 14px;
 }
@@ -1270,7 +1271,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 }
 
 .followup-kpi-value {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-size: 32px;
   font-weight: 700;
   line-height: 1;
@@ -1675,7 +1676,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 }
 
 .empty-state h5 {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-size: 18px;
   font-weight: 700;
   color: var(--navy);
@@ -1703,7 +1704,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 }
 
 .error-state h5 {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-size: 18px;
   font-weight: 700;
   color: var(--navy);
@@ -1832,7 +1833,7 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 }
 
 #tablePreferencesModal .modal-title {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--crm-font-family);
   font-weight: 600;
 }
 

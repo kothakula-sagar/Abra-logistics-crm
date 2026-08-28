@@ -368,7 +368,17 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && myUserDoc().data.active == true;
 
-      allow create, update: if isSuperAdmin();
+      allow create: if isSuperAdmin();
+
+      // Admin may update only the global font fields. All other CRM
+      // business settings remain Super Admin-only.
+      allow update: if isSuperAdmin()
+        || (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'fontFamily', 'fontGoogleUrl'
+          ])
+        );
 
       allow delete: if isSuperAdmin();
     }
