@@ -5,6 +5,9 @@
  */
 (function () {
   'use strict';
+  const getCustomersPageScroller = () => document.querySelector('.main-content') || document.scrollingElement || document.documentElement;
+  const getCustomersPageScrollTop = () => getCustomersPageScroller()?.scrollTop || 0;
+  const setCustomersPageScrollTop = (top) => { const el=getCustomersPageScroller(); if(el && Number.isFinite(top)) el.scrollTop=top; };
 
   let search = '';
   let unsubscribeStore = null;
@@ -39,7 +42,7 @@
     // A realtime listener should add/update rows without throwing the user back to row 1.
     const existingTable = body.querySelector('.customers-table-scroll');
     const savedTableScrollTop = existingTable ? existingTable.scrollTop : 0;
-    const savedWindowScrollY = window.scrollY || window.pageYOffset || 0;
+    const savedPageScrollTop = getCustomersPageScrollTop();
 
     const customers = getCustomers();
     const q = search.trim().toLowerCase();
@@ -83,7 +86,7 @@
     requestAnimationFrame(() => {
       const table = document.querySelector('.customers-table-scroll');
       if (table) table.scrollTop = savedTableScrollTop;
-      window.scrollTo({ top: savedWindowScrollY, behavior: 'auto' });
+      setCustomersPageScrollTop(savedPageScrollTop);
     });
 
     document.getElementById('customersSearch')?.addEventListener('input', e => {
