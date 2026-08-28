@@ -40,7 +40,47 @@ function closeCampaign(ch){state[ch].activeCampaignId=null;state[ch].search='';r
 function openCampaign(ch,id){state[ch].activeCampaignId=id;state[ch].search='';renderChannel(ch)}
 
 async function openContactModal(ch,id=''){if(!canEdit())return;let existing=id?state.email.contacts.find(c=>c.id===id):null;if(id&&!existing){try{const snap=await contactsRef().doc(id).get();if(snap.exists)existing={id:snap.id,...snap.data()}}catch(e){console.error(e);toast?.('Unable to load customer.','danger');return}}document.getElementById('marketingContactModalTitle').textContent=existing?'Edit Customer':'Add Customer';document.getElementById('marketingContactId').value=existing?.id||'';document.getElementById('marketingContactName').value=existing?.name||'';document.getElementById('marketingContactEmail').value=existing?.email||'';document.getElementById('marketingContactPhone').value=existing?.phone||'';document.getElementById('marketingContactCompany').value=existing?.company||'';document.getElementById('marketingContactChannel').value=ch;new bootstrap.Modal(document.getElementById('marketingContactModal')).show()}
-async function saveContact(){if(!canEdit())return;const id=document.getElementById('marketingContactId').value.trim();const ch=document.getElementById('marketingContactChannel').value;const existing=id?state.email.contacts.find(c=>c.id===id):null;const payload={name:document.getElementById('marketingContactName').value.trim(),email:document.getElementById('marketingContactEmail').value.trim(),phone:document.getElementById('marketingContactPhone').value.trim(),company:document.getElementById('marketingContactCompany').value.trim(),emailStatus:existing?statusOf(existing,'email'):'Subscribed',whatsappStatus:existing?statusOf(existing,'whatsapp'):'Subscribed',marketingStatus:existing&&(statusOf(existing,'email')==='Unsubscribed'||statusOf(existing,'whatsapp')==='Unsubscribed')?'Unsubscribed':'Subscribed',updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:CURRENT_USER.uid,updatedByName:CURRENT_USER.name||CURRENT_USER.email};if(!payload.name){toast?.('Customer name is required.','warning');return}if(!payload.email&&!payload.phone){toast?.('Add an email or phone number.','warning');return}try{const btn=document.getElementById('marketingContactSaveBtn');btn.disabled=true;if(id)await contactsRef().doc(id).update(payload);else await contactsRef().add({...payload,source:'manual',createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:CURRENT_USER.uid,createdByName:CURRENT_USER.name||CURRENT_USER.email});bootstrap.Modal.getInstance(document.getElementById('marketingContactModal'))?.hide();await refreshContacts();toast?.(id?'Customer updated.':'Customer added.','success')}catch(e){console.error(e);toast?.(e.message||'Failed to save customer.','danger')}finally{document.getElementById('marketingContactSaveBtn').disabled=false}}
+async function saveContact(){
+ if(!canEdit())return;
+ const id=document.getElementById('marketingContactId').value.trim();
+ const existing=id?state.email.contacts.find(c=>c.id===id):null;
+ const payload={name:document.getElementById('marketingContactName').value.trim(),email:document.getElementById('marketingContactEmail').value.trim(),phone:document.getElementById('marketingContactPhone').value.trim(),company:document.getElementById('marketingContactCompany').value.trim(),emailStatus:existing?statusOf(existing,'email'):'Subscribed',whatsappStatus:existing?statusOf(existing,'whatsapp'):'Subscribed',marketingStatus:existing&&(statusOf(existing,'email')==='Unsubscribed'||statusOf(existing,'whatsapp')==='Unsubscribed')?'Unsubscribed':'Subscribed',updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:CURRENT_USER.uid,updatedByName:CURRENT_USER.name||CURRENT_USER.email};
+ if(!payload.name){toast?.('Customer name is required.','warning');return}
+ if(!payload.email&&!payload.phone){toast?.('Add an email or phone number.','warning');return}
+ // Duplicate validation is intentionally local-only. We check the customer list
+ // already loaded in memory and never query Firebase for an email/phone lookup.
+ if(!contactCacheLoaded){toast?.('Customers are still loading. Please wait and try again.','warning');return}
+ const emailKey=String(payload.email||'').trim().toLowerCase();
+ const phoneKey=normalisePhone(payload.phone);
+ const duplicateEmail=emailKey&&state.email.contacts.find(c=>c.id!==id&&String(c.email||'').trim().toLowerCase()===emailKey);
+ const duplicatePhone=phoneKey&&state.email.contacts.find(c=>c.id!==id&&normalisePhone(c.phone)===phoneKey);
+ if(duplicateEmail||duplicatePhone){
+   const parts=[];
+   if(duplicateEmail)parts.push('email');
+   if(duplicatePhone)parts.push('mobile number');
+   toast?.(`Customer with this ${parts.join(' and ')} already exists in Customers.`,'danger');
+   return;
+ }
+ try{
+   const btn=document.getElementById('marketingContactSaveBtn');btn.disabled=true;
+   if(id){
+     await contactsRef().doc(id).update(payload);
+     const index=state.email.contacts.findIndex(c=>c.id===id);
+     if(index>=0){const updated={...state.email.contacts[index],...payload};state.email.contacts[index]=updated;state.whatsapp.contacts[index]={...updated};}
+   }else{
+     const created={...payload,source:'manual',createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:CURRENT_USER.uid,createdByName:CURRENT_USER.name||CURRENT_USER.email};
+     const ref=await contactsRef().add(created);
+     // Keep the local cache current without rereading the collection after the write.
+     const localCreated={...created,id:ref.id,createdAt:new Date(),updatedAt:new Date()};
+     state.email.contacts.push(localCreated);state.whatsapp.contacts.push(localCreated);
+   }
+   bootstrap.Modal.getInstance(document.getElementById('marketingContactModal'))?.hide();
+   renderChannel('email');renderChannel('whatsapp');
+   if(window.Customers)window.Customers.render();
+   toast?.(id?'Customer updated.':'Customer added.','success')
+ }catch(e){console.error(e);toast?.(e.message||'Failed to save customer.','danger')}
+ finally{document.getElementById('marketingContactSaveBtn').disabled=false}
+}
 async function deleteContact(id){if(!canDelete()||!confirm('Delete this customer?'))return;try{await contactsRef().doc(id).delete();await refreshContacts();toast?.('Customer deleted.','success')}catch(e){console.error(e);toast?.('Failed to delete customer.','danger')}}
 
 function openCampaignModal(ch,id=''){if(!canEdit())return;const c=id?state[ch].campaigns.find(x=>x.id===id):null;document.getElementById('marketingCampaignModalTitle').textContent=c?'Edit Campaign':'Create Campaign';document.getElementById('marketingCampaignId').value=c?.id||'';document.getElementById('marketingCampaignChannel').value=ch;document.getElementById('marketingCampaignName').value=c?.name||'';document.getElementById('marketingCampaignSubject').value=c?.subject||'';document.getElementById('marketingCampaignEmailProvider').value=c?.emailProvider||'Gmail';document.getElementById('marketingCampaignBody').value=c?.body||'';document.getElementById('marketingCampaignSubjectWrap').classList.toggle('d-none',ch!=='email');document.getElementById('marketingCampaignEmailProviderWrap').classList.toggle('d-none',ch!=='email');document.getElementById('marketingCampaignPlaceholderHelp').textContent=ch==='email'?'Use {{Name}} in the subject or body. It will be replaced for each customer.':'Use {{Name}} in the message. It will be replaced for each customer.';new bootstrap.Modal(document.getElementById('marketingCampaignModal')).show()}
