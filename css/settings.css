@@ -13,11 +13,11 @@
 .api-row input:focus{border-color:rgba(59,130,246,.5);box-shadow:0 0 0 3px rgba(59,130,246,.16)}
 
 .theme-row{display:flex;gap:.5rem}
-.theme-opt{padding:8px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);cursor:pointer;font-size:.83rem;font-weight:700;font-family:'Outfit',sans-serif;background:rgba(255,255,255,.05);color:var(--text2);transition:all .15s}
+.theme-opt{padding:8px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);cursor:pointer;font-size:.83rem;font-weight:700;font-family:var(--crm-font-family);background:rgba(255,255,255,.05);color:var(--text2);transition:all .15s}
 .theme-opt.active{border-color:rgba(59,130,246,.4);background:linear-gradient(135deg,rgba(59,130,246,.24),rgba(139,92,246,.2));color:#fff}
 
 .provider-row{display:flex;gap:.5rem;flex-wrap:wrap}
-.provider-opt{padding:8px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);cursor:pointer;font-size:.83rem;font-weight:700;font-family:'Outfit',sans-serif;background:rgba(255,255,255,.05);color:var(--text2);transition:all .15s;display:flex;align-items:center;gap:.4rem}
+.provider-opt{padding:8px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);cursor:pointer;font-size:.83rem;font-weight:700;font-family:var(--crm-font-family);background:rgba(255,255,255,.05);color:var(--text2);transition:all .15s;display:flex;align-items:center;gap:.4rem}
 .provider-opt.active{border-color:rgba(59,130,246,.4);background:linear-gradient(135deg,rgba(59,130,246,.24),rgba(139,92,246,.2));color:#fff}
 
 /* ACCOUNTS */

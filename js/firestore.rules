@@ -368,7 +368,22 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && myUserDoc().data.active == true;
 
+      // Super Admin can manage the complete CRM settings document.
       allow create, update: if isSuperAdmin();
+
+      // Admin can update ONLY the global CRM font fields.
+      // This is enforced server-side so the permission cannot be bypassed
+      // by calling Firestore directly from the browser.
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['fontFamily', 'fontGoogleUrl'])
+        && request.resource.data.fontFamily is string
+        && request.resource.data.fontFamily.size() > 0
+        && request.resource.data.fontFamily.size() <= 100
+        && request.resource.data.fontGoogleUrl is string
+        && request.resource.data.fontGoogleUrl.matches(
+             'https://fonts\\.googleapis\\.com/css2\\?family=.*'
+           );
 
       allow delete: if isSuperAdmin();
     }

@@ -136,7 +136,8 @@ function shouldSuppressReminders() {
 // =============================================================
 //  SETTINGS PAGE RENDERER
 //  • Super Admin  → fully editable, Save + Reset buttons shown
-//  • Admin/Member → read-only (all inputs disabled), buttons hidden
+//  • Admin        → business settings read-only; Global CRM Font editable
+//  • Other roles  → read-only
 // =============================================================
 
 function renderCRMSettingsView() {
@@ -229,12 +230,11 @@ function _sectionGlobalFont(g, canEditFont) {
   const googleUrl = g.fontGoogleUrl || "";
   return `
   <div class="mb-3">
-    <label class="form-label small fw-semibold">Google Fonts embed code or CSS URL</label>
+    <label class="form-label small fw-semibold">Google Fonts Embed Code or CSS URL</label>
     <textarea id="cfg_fontGoogleInput" class="form-control" rows="3" ${disabled}
       placeholder="Paste the <link ...> code or https://fonts.googleapis.com/css2?...">${escapeHtml(googleUrl)}</textarea>
     <div class="form-text">
-      In Google Fonts, choose a font, open <strong>Get embed code</strong>, then paste the <code>&lt;link&gt;</code> code here.
-      The CRM extracts the font family automatically.
+      Go to Google Fonts → choose a font → <strong>Get embed code</strong> → copy the <code>&lt;link&gt;</code> code and paste it here. The CRM extracts the font family automatically.
     </div>
   </div>
   <div class="row g-3 align-items-end">
@@ -242,7 +242,7 @@ function _sectionGlobalFont(g, canEditFont) {
       <label class="form-label small fw-semibold">Font Family</label>
       <input id="cfg_fontFamily" class="form-control" value="${escapeHtml(family)}" ${disabled}
         placeholder="Inter">
-      <div class="form-text">Used across the CRM, including headings, tables, buttons and forms.</div>
+      <div class="form-text">Applied across the CRM, including sidebar, headings, tables, buttons, forms, Email Marketing and WhatsApp Marketing.</div>
     </div>
     <div class="col-md-5">
       <div class="p-3 rounded border bg-light" id="crmFontPreview" style="font-family: '${escapeHtml(family).replace(/'/g, "&#39;")}';">
