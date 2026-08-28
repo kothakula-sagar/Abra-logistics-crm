@@ -35,6 +35,12 @@
     const body = document.getElementById('customersViewBody');
     if (!body) return;
 
+    // Preserve the user's position while the shared customer snapshot updates.
+    // A realtime listener should add/update rows without throwing the user back to row 1.
+    const existingTable = body.querySelector('.customers-table-scroll');
+    const savedTableScrollTop = existingTable ? existingTable.scrollTop : 0;
+    const savedWindowScrollY = window.scrollY || window.pageYOffset || 0;
+
     const customers = getCustomers();
     const q = search.trim().toLowerCase();
     const filtered = customers.filter(c =>
@@ -73,6 +79,12 @@
           </table>
         </div>
       </div>`;
+
+    requestAnimationFrame(() => {
+      const table = document.querySelector('.customers-table-scroll');
+      if (table) table.scrollTop = savedTableScrollTop;
+      window.scrollTo({ top: savedWindowScrollY, behavior: 'auto' });
+    });
 
     document.getElementById('customersSearch')?.addEventListener('input', e => {
       search = e.target.value;
