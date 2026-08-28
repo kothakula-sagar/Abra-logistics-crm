@@ -123,5 +123,8 @@
     catch (err) { console.error(err); toast?.('Failed to delete customer.', 'danger'); }
   }
 
-  window.Customers = { init, render, setStatus, delete: remove };
+  function getCustomers() { return customers.slice(); }
+  function isLoaded() { return customers.length > 0; }
+
+  window.Customers = { init, render, setStatus, delete: remove, getCustomers, isLoaded };
 })();
