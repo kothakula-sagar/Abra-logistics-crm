@@ -1,372 +1,368 @@
 // ============================================================
-// REPORT.JS — Daily lead report for Admin / Super Admin
-// Generates a professional summary message with total leads
-// and a full status breakdown for a chosen date.
-// Enhanced with period selection: Today, Yesterday, Custom Date, Date Range
+// REPORT.JS — Daily Marketing + CRM report
+// Uses ONLY data already loaded by the marketing/CRM modules.
+// No Firebase reads are performed by this module.
 // ============================================================
 
-// Friendly order + labels for the report message (kept distinct from table badge order)
-const REPORT_STATUS_ORDER = [
-  "Interested",
-  "Not Interested",
-  "Driver",
-  "Transporter",
-  "Job Seeker",
-  "Busy",
-  "Not Picking Call",
-  "Not Open"
-];
-
-const REPORT_STATUS_LABEL = {
-  "Interested": "Interested",
-  "Not Interested": "Not Interested",
-  "Driver": "Drivers",
-  "Transporter": "Transporters",
-  "Job Seeker": "Job Seekers",
-  "Busy": "Busy (call again)",
-  "Not Picking Call": "Not Picking Call",
-  "Not Open": "Pending / Not Contacted"
-};
-
-// Period selection constants
 const REPORT_PERIOD = {
-  TODAY: "today",
-  YESTERDAY: "yesterday",
-  CUSTOM_DATE: "custom_date",
-  DATE_RANGE: "date_range"
+  TODAY: 'today',
+  YESTERDAY: 'yesterday',
+  CUSTOM_DATE: 'custom_date',
+  DATE_RANGE: 'date_range'
 };
 
-// Initialize report controls and set default period
+const REPORT_TZ = 'Asia/Kolkata';
+let reportCharts = [];
+let reportReady = false;
+
+function reportNowDateKey(offsetDays = 0) {
+  const now = new Date();
+  if (offsetDays) now.setDate(now.getDate() + offsetDays);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: REPORT_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(now);
+}
+
+function reportDateKey(value) {
+  if (!value) return '';
+  const d = value?.toDate ? value.toDate() : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: REPORT_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(d);
+}
+
+function reportDateLabel(key, long = true) {
+  if (!key) return '—';
+  const d = new Date(`${key}T12:00:00`);
+  return d.toLocaleDateString('en-IN', long
+    ? { day: '2-digit', month: 'long', year: 'numeric' }
+    : { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function reportDateRange() {
+  const period = document.getElementById('reportPeriod')?.value || REPORT_PERIOD.TODAY;
+  const today = reportNowDateKey();
+  if (period === REPORT_PERIOD.YESTERDAY) {
+    const y = new Date(`${today}T12:00:00`); y.setDate(y.getDate() - 1);
+    const key = y.toISOString().slice(0,10);
+    return { from: key, to: key };
+  }
+  if (period === REPORT_PERIOD.CUSTOM_DATE) {
+    const key = document.getElementById('reportDate')?.value || today;
+    return { from: key, to: key };
+  }
+  if (period === REPORT_PERIOD.DATE_RANGE) {
+    const from = document.getElementById('reportDateRangeFrom')?.value || today;
+    const to = document.getElementById('reportDateRangeTo')?.value || today;
+    return { from: from <= to ? from : to, to: from <= to ? to : from };
+  }
+  return { from: today, to: today };
+}
+
+function inReportRange(value, range) {
+  const key = reportDateKey(value);
+  return !!key && key >= range.from && key <= range.to;
+}
+
+function getLoadedMarketingData() {
+  const data = window.MarketingChannels?.getReportData?.();
+  if (data) return data;
+  return { customers: [], emailCampaigns: [], whatsappCampaigns: [] };
+}
+
+function getLoadedLeads() {
+  return Array.isArray(window.ALL_LEADS) ? window.ALL_LEADS : [];
+}
+
+function campaignMessageEvents(campaign) {
+  return Object.entries(campaign?.sentRecipients || {}).map(([contactId, entry]) => ({
+    contactId,
+    openedAt: entry?.openedAt || entry?.sentAt || entry?.timestamp,
+    sentBy: entry?.sentBy,
+    sentByName: entry?.sentByName || 'CRM User'
+  })).filter(x => x.openedAt);
+}
+
+function getReportDataset() {
+  const range = reportDateRange();
+  const data = getLoadedMarketingData();
+  const customers = data.customers || [];
+  const emailCampaigns = data.emailCampaigns || [];
+  const whatsappCampaigns = data.whatsappCampaigns || [];
+  const allCampaigns = [
+    ...emailCampaigns.map(c => ({ ...c, channel: 'Email' })),
+    ...whatsappCampaigns.map(c => ({ ...c, channel: 'WhatsApp' }))
+  ];
+
+  const customersAdded = customers.filter(c => inReportRange(c.createdAt, range));
+  const customerUpdates = customers.filter(c => {
+    if (!c.updatedAt || !inReportRange(c.updatedAt, range)) return false;
+    const createdMs = c.createdAt?.toDate ? c.createdAt.toDate().getTime() : new Date(c.createdAt || 0).getTime();
+    const updatedMs = c.updatedAt?.toDate ? c.updatedAt.toDate().getTime() : new Date(c.updatedAt || 0).getTime();
+    return !createdMs || !updatedMs || Math.abs(updatedMs - createdMs) > 1000;
+  });
+  const campaignsCreated = allCampaigns.filter(c => inReportRange(c.createdAt, range));
+
+  const emailEvents = emailCampaigns.flatMap(c => campaignMessageEvents(c).map(e => ({ ...e, campaign: c, channel: 'Email' })))
+    .filter(e => inReportRange(e.openedAt, range));
+  const whatsappEvents = whatsappCampaigns.flatMap(c => campaignMessageEvents(c).map(e => ({ ...e, campaign: c, channel: 'WhatsApp' })))
+    .filter(e => inReportRange(e.openedAt, range));
+
+  const leadRows = getLoadedLeads().filter(l => inReportRange(l.createdAt, range));
+  const leadStatusCounts = {};
+  leadRows.forEach(l => { leadStatusCounts[l.status] = (leadStatusCounts[l.status] || 0) + 1; });
+
+  return {
+    range, customers, customersAdded, customerUpdates,
+    allCampaigns, campaignsCreated,
+    emailCampaigns, whatsappCampaigns,
+    emailEvents, whatsappEvents, leadRows, leadStatusCounts
+  };
+}
+
+function formatCount(n) { return Number(n || 0).toLocaleString('en-IN'); }
+
 function initReportControls() {
-  const periodSelect = document.getElementById("reportPeriod");
-  const dateInput = document.getElementById("reportDate");
-  const dateRangeFrom = document.getElementById("reportDateRangeFrom");
-  const dateRangeTo = document.getElementById("reportDateRangeTo");
-  
-  if (!periodSelect) return;
-  
-  // Set default period to Today
-  periodSelect.value = REPORT_PERIOD.TODAY;
-  
-  // Initialize date inputs
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  if (dateInput) {
-    dateInput.value = today.toISOString().slice(0, 10);
-    dateInput.disabled = true; // Disabled for Today period
-  }
-  
-  if (dateRangeFrom) {
-    dateRangeFrom.value = today.toISOString().slice(0, 10);
-  }
-  
-  if (dateRangeTo) {
-    dateRangeTo.value = today.toISOString().slice(0, 10);
-  }
-  
-  // Hide date range wrap initially
-  const dateRangeWrap = document.getElementById("reportDateRangeWrap");
-  if (dateRangeWrap) {
-    dateRangeWrap.classList.add("d-none");
-  }
-  
-  // Set up event listeners
-  periodSelect.addEventListener("change", handlePeriodChange);
-  
-  if (dateInput) {
-    dateInput.addEventListener("change", () => {
-      if (periodSelect.value === REPORT_PERIOD.CUSTOM_DATE) {
-        renderDailyReport();
-      }
-    });
-  }
-  
-  if (dateRangeFrom && dateRangeTo) {
-    dateRangeFrom.addEventListener("change", () => {
-      if (periodSelect.value === REPORT_PERIOD.DATE_RANGE) {
-        renderDailyReport();
-      }
-    });
-    
-    dateRangeTo.addEventListener("change", () => {
-      if (periodSelect.value === REPORT_PERIOD.DATE_RANGE) {
-        renderDailyReport();
-      }
-    });
-  }
-  
-  // Initial render
+  const period = document.getElementById('reportPeriod');
+  if (!period || reportReady) return;
+  reportReady = true;
+  const today = reportNowDateKey();
+  const yesterday = new Date(`${today}T12:00:00`); yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = yesterday.toISOString().slice(0,10);
+
+  period.value = REPORT_PERIOD.TODAY;
+  const dateInput = document.getElementById('reportDate');
+  const from = document.getElementById('reportDateRangeFrom');
+  const to = document.getElementById('reportDateRangeTo');
+  if (dateInput) { dateInput.value = today; dateInput.disabled = true; }
+  if (from) from.value = today;
+  if (to) to.value = today;
+
+  period.addEventListener('change', handlePeriodChange);
+  dateInput?.addEventListener('change', renderDailyReport);
+  from?.addEventListener('change', renderDailyReport);
+  to?.addEventListener('change', renderDailyReport);
   renderDailyReport();
 }
 
-// Handle period selection change
 function handlePeriodChange() {
-  const periodSelect = document.getElementById("reportPeriod");
-  const dateInput = document.getElementById("reportDate");
-  const dateRangeFrom = document.getElementById("reportDateRangeFrom");
-  const dateRangeTo = document.getElementById("reportDateRangeTo");
-  const dateRangeWrap = document.getElementById("reportDateRangeWrap");
-  
-  if (!periodSelect) return;
-  
-  const period = periodSelect.value;
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  // Update UI based on selected period
-  switch(period) {
-    case REPORT_PERIOD.TODAY:
-      if (dateInput) {
-        dateInput.value = today.toISOString().slice(0, 10);
-        dateInput.disabled = true;
-      }
-      if (dateRangeWrap) dateRangeWrap.classList.add("d-none");
-      break;
-      
-    case REPORT_PERIOD.YESTERDAY:
-      if (dateInput) {
-        dateInput.value = yesterday.toISOString().slice(0, 10);
-        dateInput.disabled = true;
-      }
-      if (dateRangeWrap) dateRangeWrap.classList.add("d-none");
-      break;
-      
-    case REPORT_PERIOD.CUSTOM_DATE:
-      if (dateInput) {
-        dateInput.disabled = false;
-      }
-      if (dateRangeWrap) dateRangeWrap.classList.add("d-none");
-      break;
-      
-    case REPORT_PERIOD.DATE_RANGE:
-      if (dateInput) {
-        dateInput.disabled = true;
-      }
-      if (dateRangeWrap) dateRangeWrap.classList.remove("d-none");
-      break;
+  const period = document.getElementById('reportPeriod')?.value;
+  const dateInput = document.getElementById('reportDate');
+  const rangeWrap = document.getElementById('reportDateRangeWrap');
+  const today = reportNowDateKey();
+  const y = new Date(`${today}T12:00:00`); y.setDate(y.getDate() - 1);
+  const yesterday = y.toISOString().slice(0,10);
+
+  if (period === REPORT_PERIOD.TODAY) {
+    if (dateInput) { dateInput.value = today; dateInput.disabled = true; }
+    rangeWrap?.classList.add('d-none');
+  } else if (period === REPORT_PERIOD.YESTERDAY) {
+    if (dateInput) { dateInput.value = yesterday; dateInput.disabled = true; }
+    rangeWrap?.classList.add('d-none');
+  } else if (period === REPORT_PERIOD.CUSTOM_DATE) {
+    if (dateInput) dateInput.disabled = false;
+    rangeWrap?.classList.add('d-none');
+  } else {
+    if (dateInput) dateInput.disabled = true;
+    rangeWrap?.classList.remove('d-none');
   }
-  
-  // Generate report for the selected period
   renderDailyReport();
 }
 
-// Helper function to check if a date is within a range (inclusive)
-function isDateInRange(date, fromDate, toDate) {
-  return date >= fromDate && date <= toDate;
+function statCard(label, value, sub, icon) {
+  return `<div class="col-6 col-md-3"><div class="report-stat-card report-stat-marketing">
+    <div class="d-flex justify-content-between align-items-start"><div><div class="report-stat-value">${formatCount(value)}</div><div class="report-stat-label">${label}</div></div><div class="report-kpi-icon">${icon}</div></div>
+    <div class="small text-muted mt-2">${sub}</div>
+  </div></div>`;
 }
 
-// Filtering functions
-function getLeadsForToday() {
-  const today = new Date();
-  return ALL_LEADS.filter((l) => {
-    if (!l.createdAt) return false;
-    const created = l.createdAt.toDate();
-    return created.getFullYear() === today.getFullYear() &&
-           created.getMonth() === today.getMonth() &&
-           created.getDate() === today.getDate();
+function campaignActivityRows(events, channel) {
+  const byCampaign = {};
+  events.forEach(e => {
+    const id = e.campaign?.id || e.campaign?.name || 'unknown';
+    if (!byCampaign[id]) byCampaign[id] = { name: e.campaign?.name || 'Campaign', count: 0 };
+    byCampaign[id].count++;
   });
-}
-
-function getLeadsForYesterday() {
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  return ALL_LEADS.filter((l) => {
-    if (!l.createdAt) return false;
-    const created = l.createdAt.toDate();
-    return created.getFullYear() === yesterday.getFullYear() &&
-           created.getMonth() === yesterday.getMonth() &&
-           created.getDate() === yesterday.getDate();
-  });
-}
-
-function getLeadsForCustomDate() {
-  const dateInput = document.getElementById("reportDate");
-  if (!dateInput || !dateInput.value) return getLeadsForToday();
-  
-  const selected = dateInput.value; // "YYYY-MM-DD"
-  
-  return ALL_LEADS.filter((l) => {
-    if (!l.createdAt) return false;
-    const created = l.createdAt.toDate();
-    const y = created.getFullYear();
-    const m = String(created.getMonth() + 1).padStart(2, "0");
-    const d = String(created.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}` === selected;
-  });
-}
-
-function getLeadsForDateRange() {
-  const dateRangeFrom = document.getElementById("reportDateRangeFrom");
-  const dateRangeTo = document.getElementById("reportDateRangeTo");
-  
-  if (!dateRangeFrom || !dateRangeTo || !dateRangeFrom.value || !dateRangeTo.value) {
-    return getLeadsForToday();
-  }
-  
-  const fromDate = new Date(dateRangeFrom.value + "T00:00:00");
-  const toDate = new Date(dateRangeTo.value + "T23:59:59");
-  
-  return ALL_LEADS.filter((l) => {
-    if (!l.createdAt) return false;
-    const created = l.createdAt.toDate();
-    return isDateInRange(created, fromDate, toDate);
-  });
-}
-
-// Main function to get leads based on selected period
-function getLeadsForSelectedPeriod() {
-  const periodSelect = document.getElementById("reportPeriod");
-  if (!periodSelect) return getLeadsForToday();
-  
-  switch(periodSelect.value) {
-    case REPORT_PERIOD.TODAY:
-      return getLeadsForToday();
-      
-    case REPORT_PERIOD.YESTERDAY:
-      return getLeadsForYesterday();
-      
-    case REPORT_PERIOD.CUSTOM_DATE:
-      return getLeadsForCustomDate();
-      
-    case REPORT_PERIOD.DATE_RANGE:
-      return getLeadsForDateRange();
-      
-    default:
-      return getLeadsForToday();
-  }
-}
-
-function computeStatusCounts(leads) {
-  const counts = {};
-  REPORT_STATUS_ORDER.forEach((s) => (counts[s] = 0));
-  leads.forEach((l) => {
-    if (counts[l.status] !== undefined) counts[l.status]++;
-    else counts[l.status] = (counts[l.status] || 0) + 1;
-  });
-  return counts;
+  return Object.values(byCampaign).sort((a,b) => b.count - a.count).map(x => ({ ...x, channel }));
 }
 
 function renderDailyReport() {
-  const grid = document.getElementById("reportStatsGrid");
-  const box = document.getElementById("reportMessageBox");
+  const grid = document.getElementById('reportStatsGrid');
+  const box = document.getElementById('reportMessageBox');
   if (!grid || !box) return;
 
-  const leads = getLeadsForSelectedPeriod();
-  const counts = computeStatusCounts(leads);
-  const total = leads.length;
+  const d = getReportDataset();
+  const totalMessages = d.emailEvents.length + d.whatsappEvents.length;
+  const emailCampaignsCreated = d.campaignsCreated.filter(c => c.channel === 'Email').length;
+  const whatsappCampaignsCreated = d.campaignsCreated.filter(c => c.channel === 'WhatsApp').length;
+  const leadTotal = d.leadRows.length;
 
-  // ---- Stat cards ----
-  grid.innerHTML = `
-    <div class="col-6 col-md-3">
-      <div class="report-stat-card report-stat-total">
-        <div class="report-stat-value">${total}</div>
-        <div class="report-stat-label">Total Leads</div>
-      </div>
-    </div>
-    ${REPORT_STATUS_ORDER.map((s) => `
-      <div class="col-6 col-md-3">
-        <div class="report-stat-card">
-          <div class="report-stat-value">${counts[s] || 0}</div>
-          <div class="report-stat-label">${REPORT_STATUS_LABEL[s]}</div>
-        </div>
-      </div>`).join("")}
-  `;
+  grid.innerHTML = [
+    statCard('New Customers', d.customersAdded.length, 'Added in selected period', '👥'),
+    statCard('Customer Updates', d.customerUpdates.length, 'Subscription/profile changes', '✏️'),
+    statCard('Campaigns Created', d.campaignsCreated.length, `${emailCampaignsCreated} Email · ${whatsappCampaignsCreated} WhatsApp`, '📣'),
+    statCard('Email Initiated', d.emailEvents.length, 'Opened from CRM', '✉️'),
+    statCard('WhatsApp Initiated', d.whatsappEvents.length, 'Opened from CRM', '💬'),
+    statCard('Total CRM Activity', totalMessages, 'Email + WhatsApp initiated', '📊'),
+    statCard('Leads Received', leadTotal, 'From the loaded Leads dataset', '📋'),
+    statCard('Subscribed Customers', d.customers.filter(c => c.emailStatus === 'Subscribed' || c.whatsappStatus === 'Subscribed').length, 'At least one active channel', '✅')
+  ].join('');
 
-  // ---- Message text ----
-  box.textContent = buildReportMessage(leads, counts, total);
+  box.textContent = buildProfessionalReportMessage(d);
+  renderReportCharts(d);
+  renderCampaignBreakdown(d);
 }
 
-function buildReportMessage(leads, counts, total) {
-  const periodSelect = document.getElementById("reportPeriod");
-  const dateInput = document.getElementById("reportDate");
-  const dateRangeFrom = document.getElementById("reportDateRangeFrom");
-  const dateRangeTo = document.getElementById("reportDateRangeTo");
-  const managerName = (document.getElementById("reportManagerName")?.value || "Team").trim();
-  
-  let dateLabel = "";
-  const period = periodSelect ? periodSelect.value : REPORT_PERIOD.TODAY;
-  
-  switch(period) {
-    case REPORT_PERIOD.TODAY:
-      const today = new Date();
-      dateLabel = today.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
-      break;
-      
-    case REPORT_PERIOD.YESTERDAY:
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      dateLabel = yesterday.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
-      break;
-      
-    case REPORT_PERIOD.CUSTOM_DATE:
-      if (dateInput && dateInput.value) {
-        const dateObj = new Date(dateInput.value + "T00:00:00");
-        dateLabel = dateObj.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
-      } else {
-        const today = new Date();
-        dateLabel = today.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
-      }
-      break;
-      
-    case REPORT_PERIOD.DATE_RANGE:
-      if (dateRangeFrom && dateRangeTo && dateRangeFrom.value && dateRangeTo.value) {
-        const fromDate = new Date(dateRangeFrom.value + "T00:00:00");
-        const toDate = new Date(dateRangeTo.value + "T00:00:00");
-        dateLabel = `${fromDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} - ${toDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
-      } else {
-        const today = new Date();
-        dateLabel = today.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
-      }
-      break;
+function buildProfessionalReportMessage(d) {
+  const period = document.getElementById('reportPeriod')?.value || REPORT_PERIOD.TODAY;
+  const rangeLabel = d.range.from === d.range.to
+    ? reportDateLabel(d.range.from)
+    : `${reportDateLabel(d.range.from, false)} – ${reportDateLabel(d.range.to, false)}`;
+  const name = (document.getElementById('reportManagerName')?.value || CURRENT_USER?.name || 'Team').trim();
+  const emailByCampaign = campaignActivityRows(d.emailEvents, 'Email');
+  const waByCampaign = campaignActivityRows(d.whatsappEvents, 'WhatsApp');
+
+  const lines = [
+    `Dear ${name},`,
+    '',
+    `Please find below the Abra Logistics CRM Marketing Activity Report for ${rangeLabel}.`,
+    '',
+    'CUSTOMER ACTIVITY',
+    `• New customers added: ${formatCount(d.customersAdded.length)}`,
+    `• Customer updates recorded: ${formatCount(d.customerUpdates.length)}`,
+    '',
+    'CAMPAIGN ACTIVITY',
+    `• Campaigns created: ${formatCount(d.campaignsCreated.length)}`,
+    `  - Email campaigns: ${formatCount(d.campaignsCreated.filter(c => c.channel === 'Email').length)}`,
+    `  - WhatsApp campaigns: ${formatCount(d.campaignsCreated.filter(c => c.channel === 'WhatsApp').length)}`,
+    '',
+    'MESSAGE ACTIVITY',
+    `• Email messages initiated from CRM: ${formatCount(d.emailEvents.length)}`,
+    `• WhatsApp messages initiated from CRM: ${formatCount(d.whatsappEvents.length)}`,
+    `• Total marketing messages initiated: ${formatCount(d.emailEvents.length + d.whatsappEvents.length)}`,
+    ''
+  ];
+
+  if (emailByCampaign.length) {
+    lines.push('EMAIL CAMPAIGN BREAKDOWN');
+    emailByCampaign.forEach(c => lines.push(`• ${c.name}: ${formatCount(c.count)} message(s) initiated`));
+    lines.push('');
+  }
+  if (waByCampaign.length) {
+    lines.push('WHATSAPP CAMPAIGN BREAKDOWN');
+    waByCampaign.forEach(c => lines.push(`• ${c.name}: ${formatCount(c.count)} message(s) initiated`));
+    lines.push('');
   }
 
-  const lines = [];
-  
-  if (period === REPORT_PERIOD.DATE_RANGE) {
-    lines.push(`Hi ${managerName}, here is the lead summary for Abra Logistics (${dateLabel}):`);
-  } else {
-    lines.push(`Hi ${managerName}, here is today's lead summary for Abra Logistics (${dateLabel}):`);
+  if (d.leadRows.length) {
+    lines.push('CRM LEAD ACTIVITY');
+    lines.push(`• Leads received: ${formatCount(d.leadRows.length)}`);
+    lines.push(`• Interested: ${formatCount(d.leadStatusCounts.Interested || 0)}`);
+    lines.push(`• Not Interested: ${formatCount(d.leadStatusCounts['Not Interested'] || 0)}`);
+    lines.push(`• Pending / Not Open: ${formatCount(d.leadStatusCounts['Not Open'] || 0)}`);
+    lines.push('');
   }
-  
-  lines.push("");
-  lines.push(`Total leads received: ${total}`);
-  lines.push("");
 
-  REPORT_STATUS_ORDER.forEach((s) => {
-    lines.push(`${REPORT_STATUS_LABEL[s]}: ${counts[s] || 0}`);
-  });
+  lines.push('Note: Email and WhatsApp activity is counted when the CRM opens the personalized message/compose action. The CRM cannot confirm that the final Send button was pressed in Gmail, Outlook or WhatsApp.');
+  lines.push('');
+  lines.push('Regards,');
+  lines.push(CURRENT_USER?.name || 'Abra Logistics Team');
+  return lines.join('\n');
+}
 
-  lines.push("");
-  const pendingCount = counts["Not Open"] || 0;
-  if (pendingCount > 0) {
-    lines.push(`Note: ${pendingCount} lead(s) are still pending first contact — following up shortly.`);
-  } else {
-    lines.push("All leads received have been contacted at least once.");
+function destroyReportCharts() {
+  reportCharts.forEach(c => { try { c.destroy(); } catch (_) {} });
+  reportCharts = [];
+}
+
+function dailyKeys(range) {
+  const keys = [];
+  const d = new Date(`${range.from}T12:00:00`);
+  const end = new Date(`${range.to}T12:00:00`);
+  while (d <= end) {
+    keys.push(d.toISOString().slice(0,10));
+    d.setDate(d.getDate() + 1);
   }
-  lines.push("");
-  lines.push("Regards,");
-  lines.push(CURRENT_USER?.name || "Abra Logistics Sales Team");
+  return keys;
+}
 
-  return lines.join("\n");
+function countByDate(items, dateGetter, keys) {
+  const counts = Object.fromEntries(keys.map(k => [k, 0]));
+  items.forEach(item => { const k = reportDateKey(dateGetter(item)); if (k && counts[k] !== undefined) counts[k]++; });
+  return counts;
+}
+
+function renderReportCharts(d) {
+  const canvases = ['reportCustomerChart','reportCampaignChart','reportMessageChart'];
+  if (!canvases.some(id => document.getElementById(id))) return;
+  destroyReportCharts();
+  if (typeof Chart === 'undefined') return;
+
+  const keys = dailyKeys(d.range);
+  const labels = keys.map(k => reportDateLabel(k, false));
+  const customerCounts = countByDate(d.customersAdded, x => x.createdAt, keys);
+  const campaignCounts = countByDate(d.campaignsCreated, x => x.createdAt, keys);
+  const emailCounts = countByDate(d.emailEvents, x => x.openedAt, keys);
+  const waCounts = countByDate(d.whatsappEvents, x => x.openedAt, keys);
+
+  const make = (id, datasets) => {
+    const el = document.getElementById(id); if (!el) return;
+    reportCharts.push(new Chart(el, {
+      type: 'line',
+      data: { labels, datasets },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    }));
+  };
+  make('reportCustomerChart', [{ label: 'New Customers', data: keys.map(k => customerCounts[k]), tension: .3, fill: true }]);
+  make('reportCampaignChart', [{ label: 'Campaigns Created', data: keys.map(k => campaignCounts[k]), tension: .3, fill: true }]);
+  make('reportMessageChart', [
+    { label: 'Email', data: keys.map(k => emailCounts[k]), tension: .3, fill: false },
+    { label: 'WhatsApp', data: keys.map(k => waCounts[k]), tension: .3, fill: false }
+  ]);
+}
+
+function renderCampaignBreakdown(d) {
+  const wrap = document.getElementById('reportCampaignBreakdown');
+  if (!wrap) return;
+  const rows = [...campaignActivityRows(d.emailEvents, 'Email'), ...campaignActivityRows(d.whatsappEvents, 'WhatsApp')];
+  const max = Math.max(1, ...rows.map(r => r.count));
+  wrap.innerHTML = rows.length ? rows.map(r => {
+    const pct = Math.round((r.count / max) * 100);
+    const cls = r.channel === 'Email' ? 'bg-primary' : 'bg-success';
+    return `<div class="report-campaign-row"><div class="d-flex justify-content-between gap-2 mb-1"><span><span class="badge ${cls} me-2">${r.channel}</span><strong>${escapeHtml(r.name)}</strong></span><span class="fw-semibold">${formatCount(r.count)}</span></div><div class="progress report-progress"><div class="progress-bar ${cls}" style="width:${pct}%"></div></div></div>`;
+  }).join('') : '<div class="text-muted py-4 text-center">No campaign message activity for this period.</div>';
 }
 
 function copyReportMessage() {
-  const box = document.getElementById("reportMessageBox");
-  if (!box) return;
-  navigator.clipboard.writeText(box.textContent).then(
-    () => toast("Report copied to clipboard.", "success"),
-    () => toast("Could not copy — please select and copy manually.", "danger")
-  );
+  const box = document.getElementById('reportMessageBox'); if (!box) return;
+  navigator.clipboard.writeText(box.textContent).then(() => toast('Report copied to clipboard.', 'success'), () => toast('Could not copy the report.', 'danger'));
 }
 
 function shareReportOnWhatsApp() {
-  const box = document.getElementById("reportMessageBox");
-  if (!box) return;
-  const encoded = encodeURIComponent(box.textContent);
-  window.open(`https://wa.me/?text=${encoded}`, "_blank");
+  const box = document.getElementById('reportMessageBox'); if (!box) return;
+  window.open(`https://wa.me/?text=${encodeURIComponent(box.textContent)}`, '_blank', 'noopener,noreferrer');
 }
+
+// Backwards-compatible helpers used by older screens.
+function getLeadsForToday() { const k = reportNowDateKey(); return getLoadedLeads().filter(l => reportDateKey(l.createdAt) === k); }
+function getLeadsForYesterday() { const k = reportDateRangeForYesterday(); return getLoadedLeads().filter(l => reportDateKey(l.createdAt) === k); }
+function reportDateRangeForYesterday() { const t = reportNowDateKey(); const d = new Date(`${t}T12:00:00`); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); }
+function getLeadsForCustomDate() { const k = document.getElementById('reportDate')?.value || reportNowDateKey(); return getLoadedLeads().filter(l => reportDateKey(l.createdAt) === k); }
+function getLeadsForDateRange() { const r=reportDateRange(); return getLoadedLeads().filter(l => inReportRange(l.createdAt,r)); }
+function getLeadsForSelectedPeriod() { return getLeadsForDateRange(); }
+
+function switchMainReportTab(tab) {
+  const daily = document.getElementById('dailyReportPanel');
+  const campaign = document.getElementById('campaignReportsPanel');
+  const dailyBtn = document.getElementById('reportTabDaily');
+  const campaignBtn = document.getElementById('reportTabCampaign');
+  const isCampaign = tab === 'campaign';
+  daily?.classList.toggle('d-none', isCampaign);
+  campaign?.classList.toggle('d-none', !isCampaign);
+  dailyBtn?.classList.toggle('active', !isCampaign);
+  campaignBtn?.classList.toggle('active', isCampaign);
+  if (isCampaign && typeof renderCampaignReportsPanel === 'function') renderCampaignReportsPanel();
+  if (!isCampaign) renderDailyReport();
+}
+window.CRMReport = { refresh: renderDailyReport };

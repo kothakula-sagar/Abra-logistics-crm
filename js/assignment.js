@@ -8,12 +8,12 @@
 //  • Half-day morning leave: member eligible only after lunch
 //  • Half-day afternoon leave: member eligible only before lunch
 //  • Pending leads assigned gradually (interval from settings)
-//  • Every action is logged to auditLog collection
+//  • Assignment activity is kept in lead history; the retired Audit Log collection is not read or written.
 // ============================================================
 
 const assignmentQueueRef = db.collection("assignmentQueue");
-const auditLogRef        = db.collection("auditLog");
 const leavesRef          = db.collection("leaves");
+
 
 function getAssignmentRoleForLead(lead) {
   if (!lead) return DEFAULT_ASSIGNMENT_ROLE;
@@ -25,22 +25,6 @@ function getAssignmentRoleForLead(lead) {
   return DEFAULT_ASSIGNMENT_ROLE;
 }
 
-// ── Audit log writer ──────────────────────────────────────────
-async function writeAuditLog(leadId, slNo, action, reason, actorName) {
-  try {
-    await auditLogRef.add({
-      leadId,
-      slNo:      slNo || null,
-      action,
-      reason,
-      actor:     actorName || "System",
-      timestamp: firebase.firestore.Timestamp.now(),
-      date:      new Date().toISOString().slice(0, 10)
-    });
-  } catch (e) {
-    console.warn("Audit log write failed:", e.message);
-  }
-}
 
 // ── Determine if current moment is valid for assignment ───────
 function isValidAssignmentTime() {
@@ -334,7 +318,6 @@ async function assignLead(leadDoc) {
 
   if (!member) {
     console.log("Assigned To:", "No available employee");
-    await writeAuditLog(leadDoc.id, leadData.slNo, "Skipped", `No ${assignmentRole} available`, "System");
     return false;
   }
 
@@ -362,9 +345,6 @@ async function assignLead(leadDoc) {
       timestamp:     new Date().toISOString()
     })
   });
-
-  await writeAuditLog(leadDoc.id, leadData.slNo, "Assigned After Office Opening",
-    `Assigned to ${member.name || member.email}`, "System");
 
   console.log("Assignment Completed");
   return true;
@@ -448,17 +428,6 @@ async function assignLeadToEmployee(leadId, memberId, overrideOfficeHours = fals
   if (getCRMSetting("whatsappAlerts") === true && employee.phoneNumber) {
     console.log("WhatsApp notification queued for:", employee.phoneNumber);
   }
-
-  await auditLogRef.add({
-    leadId: leadId,
-    customer: leadData.fullName || "—",
-    assignedFrom: leadData.assignedToName || "Pending",
-    assignedTo: assignedToName,
-    assignedBy: CURRENT_USER.name || CURRENT_USER.email,
-    role: CURRENT_USER.role,
-    reason: overrideOfficeHours ? "Manual override assigned outside office hours" : "Manual lead assignment",
-    timestamp: now
-  });
 
   return { leadId, assignedTo: assignedToName };
 }
@@ -596,7 +565,6 @@ async function smartCreateLead(formData) {
   const reason = assignedMember
     ? `Assigned to ${assignedMember.name || assignedMember.email}`
     : "Created outside valid assignment window";
-  await writeAuditLog(newLeadRef.id, nextSlNo, action, reason, CURRENT_USER.name || CURRENT_USER.email);
 
   // Keep the marketing contact cache in sync without re-reading the new lead.
   if (window.MarketingChannels?.syncLeadUpdate) {
@@ -661,7 +629,6 @@ function startAssignmentWatcher() {
 
 // Export functions for use by other modules
 window.getNextAvailableUserByRole = getNextAvailableUserByRole;
-window.writeAuditLog = writeAuditLog;
 window.isValidAssignmentTime = isValidAssignmentTime;
 window.getTodayLeaves = getTodayLeaves;
 window.canManualAssignNow = canManualAssignNow;

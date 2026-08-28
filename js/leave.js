@@ -52,11 +52,18 @@ async function renderLeaveView() {
   const isAdmin = CURRENT_USER.role === "admin";
   const isMember = CURRENT_USER.role === "member";
 
-  // Pre-fetch users for all roles (needed for member names)
+  // Staff can read the team list. Employees only need their own profile.
+  // This also prevents private user fields from being exposed through a
+  // collection list query.
   if (ALL_USERS_LIST.length === 0) {
-    const snap = await usersRef.where("active", "==", true).get();
     ALL_USERS_LIST = [];
-    snap.forEach(d => ALL_USERS_LIST.push({ id: d.id, ...d.data() }));
+    if (isSA || isAdmin) {
+      const snap = await usersRef.where("active", "==", true).get();
+      snap.forEach(d => ALL_USERS_LIST.push({ id: d.id, ...d.data() }));
+    } else {
+      const snap = await usersRef.doc(CURRENT_USER.uid).get();
+      if (snap.exists) ALL_USERS_LIST.push({ id: snap.id, ...snap.data() });
+    }
   }
 
   // Super Admin sees pending leave requests for approval

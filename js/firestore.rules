@@ -157,8 +157,7 @@ service cloud.firestore {
       // - Team information
       // - Lead assignment
       //
-      allow list: if isSignedIn()
-        && myUserDoc().data.active == true;
+      allow list: if isStaff();
 
 
       // ----------------------------------------------------------
@@ -234,16 +233,16 @@ service cloud.firestore {
       // DELETE
       // ----------------------------------------------------------
       //
-      // Only Super Admin can delete leads.
+      // Admin / Super Admin can delete leads.
       //
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isAdmin();
 
 
       // ----------------------------------------------------------
       // UPDATE
       // ----------------------------------------------------------
       //
-      // Super Admin:
+      // Super Admin / Admin:
       //   Can update anything.
       //
       // Member / HR:
@@ -258,6 +257,7 @@ service cloud.firestore {
       // denies the WHOLE update — this was blocking Members from updating
       // any lead that predates campaign tracking, unrelated to role at all.
       allow update: if isSuperAdmin()
+        || isAdmin()
         || (
           isOwnLeadScopedRole()
 
@@ -403,28 +403,6 @@ service cloud.firestore {
 
 
     // ============================================================
-    // AUDIT LOG
-    // ============================================================
-    //
-    // Append-only log for automatic assignment actions.
-    //
-    // Staff can read.
-    // Active authenticated users can create.
-    // Nobody can modify/delete an existing audit entry.
-    // ============================================================
-
-    match /auditLog/{docId} {
-
-      allow read: if isStaff();
-
-      allow create: if isSignedIn()
-        && myUserDoc().data.active == true;
-
-      allow update, delete: if false;
-    }
-
-
-    // ============================================================
     // EMPLOYEE LEAVE
     // ============================================================
     //
@@ -440,12 +418,13 @@ service cloud.firestore {
 
       allow read: if isStaff()
         || (
-          isMember()
+          (isMember() || isHR())
           && resource.data.memberId == request.auth.uid
         );
 
-      allow create: if isSignedIn()
-        && myUserDoc().data.active == true;
+      allow create: if isStaff()
+        || (isMember() && request.resource.data.memberId == request.auth.uid)
+        || (isHR() && request.resource.data.memberId == request.auth.uid);
 
       allow update: if isStaff();
 
@@ -562,7 +541,23 @@ service cloud.firestore {
     // ============================================================
 
     match /marketingContacts/{contactId} {
-      allow read, create, update: if isSignedIn()
+      // All active CRM users can add customers.
+      allow create: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      // Everyone with Customers access can change ONLY channel subscription
+      // state and its audit metadata. Profile/company fields remain admin-only.
+      allow update: if isStaff()
+        || (
+          isSignedIn()
+          && myUserDoc().data.active == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'emailStatus', 'whatsappStatus', 'marketingStatus',
+            'updatedAt', 'updatedBy', 'updatedByName'
+          ])
+        );
+
+      allow read: if isSignedIn()
         && myUserDoc().data.active == true;
 
       allow delete: if isAdmin() || isSuperAdmin();
@@ -654,8 +649,11 @@ service cloud.firestore {
           )
         );
 
-      allow create: if isSignedIn()
-        && myUserDoc().data.active == true;
+      allow create: if isStaff()
+        || (
+          isMember()
+          && request.resource.data.get('salesMemberId', null) == request.auth.uid
+        );
 
       allow update: if isStaff() || isHR();
 

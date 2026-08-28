@@ -915,14 +915,6 @@ h1, h2, h3, .auth-brand-title, .sidebar-brand-title {
 }
 
 /* ============================================================
-   AUDIT LOG — action badges
-   ============================================================ */
-.badge.audit-badge-success   { background: #D8F3DD; color: #1E7A34; }
-.badge.audit-badge-warning   { background: #FEF3C7; color: #92600A; }
-.badge.audit-badge-danger    { background: #FBD7D7; color: #B23434; }
-.badge.audit-badge-secondary { background: #E3E8EF; color: #45566B; }
-.badge.audit-badge-info      { background: #DCE8FB; color: #2A5A9C; }
-/* ============================================================
    CALL AUDIT — upload modal and dashboard
    ============================================================ */
 

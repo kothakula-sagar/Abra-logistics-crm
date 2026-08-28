@@ -1,37 +1,48 @@
 /*
  * CUSTOMERS — single CRM customer directory.
- * Uses marketingContacts as the customer cache so marketing pages do not
- * need to query the full leads collection again.
+ * The customer data is owned by MarketingChannels so Customers, Email,
+ * WhatsApp and Reports all use the same in-memory dataset.
  */
 (function () {
   'use strict';
 
-  const ref = () => db.collection('marketingContacts');
-  let unsubscribe = null;
-  let customers = [];
   let search = '';
+  let unsubscribeStore = null;
 
   const isAdmin = () => ['admin', 'superadmin'].includes(window.CURRENT_USER?.role);
-  const canEdit = () => !!window.CURRENT_USER?.active;
+  const isActive = () => !!window.CURRENT_USER?.active;
+  const esc = (v) => String(v ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 
-  const esc = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
-  const dateText = (v) => {
-    if (!v) return '—';
-    const d = v?.toDate ? v.toDate() : new Date(v);
-    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
-  };
-  const statusOf = (c, channel) => {
-    const value = channel === 'whatsapp' ? c.whatsappStatus : c.emailStatus;
-    if (value) return ['Not Interested','Unsubscribed'].includes(value) ? 'Unsubscribed' : 'Subscribed';
-    if (c.marketingStatus) return ['Not Interested','Unsubscribed'].includes(c.marketingStatus) ? 'Unsubscribed' : 'Subscribed';
+  const hasEmail = c => !!String(c?.email || '').trim();
+  const hasWhatsApp = c => !!window.MarketingChannels?.normalisePhone?.(c?.phone) || /^\+?\d[\d\s().-]{8,}$/.test(String(c?.phone || '').trim());
+
+  function channelStatus(c, channel) {
+    const hasChannel = channel === 'email' ? hasEmail(c) : hasWhatsApp(c);
+    if (!hasChannel) return null;
+    const value = channel === 'email' ? c.emailStatus : c.whatsappStatus;
+    if (value) return ['Not Interested', 'Unsubscribed'].includes(value) ? 'Unsubscribed' : 'Subscribed';
+    if (c.marketingStatus) return ['Not Interested', 'Unsubscribed'].includes(c.marketingStatus) ? 'Unsubscribed' : 'Subscribed';
     return 'Subscribed';
-  };
+  }
+
+  function getCustomers() {
+    return window.MarketingChannels?.getContacts?.() || [];
+  }
 
   function render() {
     const body = document.getElementById('customersViewBody');
     if (!body) return;
+
+    const customers = getCustomers();
     const q = search.trim().toLowerCase();
-    const filtered = customers.filter(c => `${c.name||''} ${c.email||''} ${c.phone||''} ${c.company||''} ${c.source||''}`.toLowerCase().includes(q));
+    const filtered = customers.filter(c =>
+      `${c.name||''} ${c.email||''} ${c.phone||''} ${c.company||''} ${c.source||''}`.toLowerCase().includes(q)
+    );
+
+    const whatsappSubscribed = customers.filter(c => channelStatus(c, 'whatsapp') === 'Subscribed').length;
+    const emailSubscribed = customers.filter(c => channelStatus(c, 'email') === 'Subscribed').length;
 
     body.innerHTML = `
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -41,13 +52,14 @@
         </div>
         <div class="d-flex gap-2 align-items-center">
           <input id="customersSearch" class="form-control" style="min-width:260px" placeholder="Search customers..." value="${esc(search)}">
-          ${isAdmin() ? `<button class="btn btn-outline-secondary" onclick="window.MarketingChannels.syncExistingLeads()"><i class="bi bi-arrow-repeat me-1"></i>Sync Existing Leads</button>` : ''}${canEdit() ? `<button class="btn btn-brand" onclick="window.MarketingChannels.openContactModal('email')"><i class="bi bi-person-plus me-1"></i>Add Customer</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-outline-secondary" onclick="window.MarketingChannels.syncExistingLeads()"><i class="bi bi-arrow-repeat me-1"></i>Sync Existing Leads</button>` : ''}
+          ${isActive() ? `<button class="btn btn-brand" onclick="window.MarketingChannels.openContactModal('email')"><i class="bi bi-person-plus me-1"></i>Add Customer</button>` : ''}
         </div>
       </div>
       <div class="row g-2 mb-3">
         <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Total Customers</span><strong>${customers.length}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>WhatsApp Subscribed</span><strong>${customers.filter(c=>statusOf(c,'whatsapp')==='Subscribed').length}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Email Subscribed</span><strong>${customers.filter(c=>statusOf(c,'email')==='Subscribed').length}</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>WhatsApp Subscribed</span><strong>${whatsappSubscribed}</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Email Subscribed</span><strong>${emailSubscribed}</strong></div></div>
         <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Manual Customers</span><strong>${customers.filter(c=>c.source!=='lead').length}</strong></div></div>
       </div>
       <div class="marketing-card">
@@ -62,12 +74,25 @@
         </div>
       </div>`;
 
-    document.getElementById('customersSearch')?.addEventListener('input', e => { search=e.target.value; render(); });
+    document.getElementById('customersSearch')?.addEventListener('input', e => {
+      search = e.target.value;
+      render();
+      const input = document.getElementById('customersSearch');
+      if (input) { input.focus(); input.setSelectionRange(search.length, search.length); }
+    });
+  }
+
+  function statusCell(c, channel) {
+    const status = channelStatus(c, channel);
+    const label = channel === 'email' ? 'Email' : 'WhatsApp';
+    if (!status) return `<span class="badge bg-light text-secondary">No ${label === 'Email' ? 'email' : 'WhatsApp number'}</span>`;
+    return `<select class="form-select form-select-sm customer-status-select ${status==='Unsubscribed'?'border-danger':''}" onchange="window.Customers.setStatus('${esc(c.id)}','${channel}',this.value)">
+      <option value="Subscribed" ${status==='Subscribed'?'selected':''}>Subscribed</option>
+      <option value="Unsubscribed" ${status==='Unsubscribed'?'selected':''}>Unsubscribed</option>
+    </select>`;
   }
 
   function customerRow(c, index) {
-    const wa = statusOf(c,'whatsapp');
-    const em = statusOf(c,'email');
     const source = c.source === 'lead' ? 'Lead' : 'Manual';
     const addedBy = c.createdByName || c.updatedByName || c.addedByName || '—';
     return `<tr>
@@ -76,55 +101,37 @@
       <td>${esc(c.email || '—')}</td>
       <td>${esc(c.phone || '—')}</td>
       <td>${esc(c.company || '—')}</td>
-      <td><select class="form-select form-select-sm customer-status-select ${wa==='Unsubscribed'?'border-danger':''}" onchange="window.Customers.setStatus('${c.id}','whatsapp',this.value)"><option ${wa==='Subscribed'?'selected':''}>Subscribed</option><option ${wa==='Unsubscribed'?'selected':''}>Unsubscribed</option></select></td>
-      <td><select class="form-select form-select-sm customer-status-select ${em==='Unsubscribed'?'border-danger':''}" onchange="window.Customers.setStatus('${c.id}','email',this.value)"><option ${em==='Subscribed'?'selected':''}>Subscribed</option><option ${em==='Unsubscribed'?'selected':''}>Unsubscribed</option></select></td>
+      <td>${statusCell(c, 'whatsapp')}</td>
+      <td>${statusCell(c, 'email')}</td>
       <td><span class="badge bg-light text-dark">${esc(source)}</span></td>
-      <td><div class="d-flex gap-1">${canEdit()?`<button class="btn btn-sm btn-outline-secondary" onclick="window.MarketingChannels.openContactModal('email','${c.id}')">Edit</button>`:''}${isAdmin()?`<button class="btn btn-sm btn-outline-danger" onclick="window.Customers.delete('${c.id}')">Delete</button>`:''}</div></td>
+      <td><div class="d-flex gap-1">${isAdmin()?`<button class="btn btn-sm btn-outline-secondary" onclick="window.MarketingChannels.openContactModal('email','${esc(c.id)}')">Edit</button>`:''}${isAdmin()?`<button class="btn btn-sm btn-outline-danger" onclick="window.Customers.delete('${esc(c.id)}')">Delete</button>`:''}</div></td>
       <td>${esc(addedBy)}</td>
     </tr>`;
   }
 
   async function init() {
-    if (!window.CURRENT_USER?.active) return;
-    if (unsubscribe) unsubscribe();
-    unsubscribe = ref().orderBy('createdAt','asc').onSnapshot(snapshot => {
-      customers = snapshot.docs.map(d => ({id:d.id,...d.data()}));
-      render();
-    }, err => {
-      console.error('Customers listener failed:', err);
-      toast?.('Failed to load customers.', 'danger');
-    });
+    if (!isActive()) return;
+    if (unsubscribeStore) unsubscribeStore();
+    if (window.MarketingChannels?.onContactsChange) {
+      unsubscribeStore = window.MarketingChannels.onContactsChange(() => render());
+    }
+    await window.MarketingChannels?.ensureContactsLoaded?.();
     render();
   }
 
   async function setStatus(id, channel, value) {
-    if (!canEdit()) return;
-    const payload = { updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: CURRENT_USER.uid, updatedByName: CURRENT_USER.name || CURRENT_USER.email };
-    if (channel === 'whatsapp') payload.whatsappStatus = value; else payload.emailStatus = value;
-    // Keep the legacy field for older screens/data, but channel-specific status is authoritative.
-    if (value === 'Unsubscribed') payload.marketingStatus = 'Unsubscribed';
-    else {
-      const c = customers.find(x=>x.id===id);
-      const other = channel === 'whatsapp' ? statusOf(c||{},'email') : statusOf(c||{},'whatsapp');
-      payload.marketingStatus = other === 'Unsubscribed' ? 'Unsubscribed' : 'Subscribed';
-    }
-    try {
-      await ref().doc(id).update(payload);
-      toast?.(`${channel === 'whatsapp' ? 'WhatsApp' : 'Email'} status updated.`, 'success');
-    } catch (err) {
-      console.error(err);
-      toast?.('Failed to update customer status.', 'danger');
-    }
+    if (!isActive()) return;
+    const customers = getCustomers();
+    const c = customers.find(x => x.id === id);
+    if (!c) return;
+    if ((channel === 'email' && !hasEmail(c)) || (channel === 'whatsapp' && !hasWhatsApp(c))) return;
+    await window.MarketingChannels?.setContactStatus?.(id, channel, value);
   }
 
   async function remove(id) {
     if (!isAdmin() || !confirm('Delete this customer? This cannot be undone.')) return;
-    try { await ref().doc(id).delete(); toast?.('Customer deleted.', 'success'); }
-    catch (err) { console.error(err); toast?.('Failed to delete customer.', 'danger'); }
+    await window.MarketingChannels?.deleteContact?.(id);
   }
 
-  function getCustomers() { return customers.slice(); }
-  function isLoaded() { return customers.length > 0; }
-
-  window.Customers = { init, render, setStatus, delete: remove, getCustomers, isLoaded };
+  window.Customers = { init, render, setStatus, delete: remove, getCustomers, isLoaded: () => getCustomers().length > 0 };
 })();

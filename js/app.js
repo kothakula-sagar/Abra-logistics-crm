@@ -38,6 +38,13 @@ async function initApp() {
   // only Super Admin sees the management UI)
   subscribeCampaigns();
 
+  // Prime the shared MarketingChannels cache once. Reports, Customers,
+  // Email and WhatsApp all consume this same in-memory dataset, so opening
+  // Reports does not issue another Firebase read.
+  if (["superadmin", "admin", "marketing"].includes(CURRENT_USER.role) && window.MarketingChannels?.preload) {
+    await window.MarketingChannels.preload();
+  }
+
   // Load personal AI settings
   await loadAISettings();
 
@@ -107,10 +114,8 @@ function buildNav() {
   const canViewReport = isSA || hasPermission("reports.view");
   const canViewLeave = isSA || hasPermission("leave.view");
   const canViewHRTransfers = isSA || hasPermission("hrTransfers.view");
-  const canViewAuditLog = isSA || hasPermission("auditLog.view");
   const canViewUsers = isSA || hasPermission("manageTeam.view");
   const canViewCampaigns = isSA || hasPermission("campaignManagement.view");
-  const canViewCampaignReports = isSA || hasPermission("campaignReports.view");
   const canViewCRMSettings = isSA || hasPermission("crmSettings.view");
   const canViewAISettings = isSA || hasPermission("aiSettings.view");
   const canViewPermissions = isSA;
@@ -122,13 +127,14 @@ function buildNav() {
 
   let html = "";
 
-  // Marketing role is intentionally limited to the four requested modules.
+  // Marketing role is intentionally limited to the marketing workspace plus Daily Report.
   if (CURRENT_USER?.role === "marketing") {
     html += `
       <a href="#" class="nav-link nav-item-link" data-view="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a href="#" class="nav-link nav-item-link" data-view="customers"><i class="bi bi-people"></i> Customers</a>
       <a href="#" class="nav-link nav-item-link" data-view="emailmarketing"><i class="bi bi-envelope-at"></i> Email Marketing</a>
-      <a href="#" class="nav-link nav-item-link" data-view="whatsappmarketing"><i class="bi bi-whatsapp"></i> WhatsApp Marketing</a>`;
+      <a href="#" class="nav-link nav-item-link" data-view="whatsappmarketing"><i class="bi bi-whatsapp"></i> WhatsApp Marketing</a>
+      <a href="#" class="nav-link nav-item-link" data-view="report"><i class="bi bi-file-earmark-bar-graph"></i> Daily Report</a>`;
     nav.innerHTML = html;
     document.querySelectorAll(".nav-item-link").forEach((link) => {
       link.addEventListener("click", (e) => {
@@ -204,13 +210,6 @@ function buildNav() {
     </a>`;
   }
 
-  if (canViewAuditLog) {
-    html += `
-    <a href="#" class="nav-link nav-item-link" data-view="auditlog">
-      <i class="bi bi-journal-text"></i> Audit Log
-    </a>`;
-  }
-
   if (canViewUsers) {
     html += `
     <a href="#" class="nav-link nav-item-link" data-view="users">
@@ -253,13 +252,6 @@ function buildNav() {
     </a>`;
   }
 
-  if (canViewCampaignReports) {
-    html += `
-    <a href="#" class="nav-link nav-item-link" data-view="campaignreports">
-      <i class="bi bi-file-earmark-bar-graph"></i> Campaign Reports
-    </a>`;
-  }
-
   if (canViewCRMSettings) {
     html += `
     <a href="#" class="nav-link nav-item-link nav-crm-settings" data-view="crmsettings">
@@ -296,7 +288,7 @@ function buildNav() {
 function canAccessView(viewName) {
   if (!viewName) return false;
   if (CURRENT_USER && CURRENT_USER.role === "superadmin") return true;
-  if (CURRENT_USER?.role === "marketing") return ["dashboard", "customers", "emailmarketing", "whatsappmarketing"].includes(viewName);
+  if (CURRENT_USER?.role === "marketing") return ["dashboard", "customers", "emailmarketing", "whatsappmarketing", "report"].includes(viewName);
   if (CURRENT_USER?.active && ["dashboard", "customers", "docs", "emailmarketing", "whatsappmarketing"].includes(viewName)) return true;
   const requiredPermission = window.PERMISSION_VIEW_PATHS && window.PERMISSION_VIEW_PATHS[viewName];
   return !requiredPermission || hasPermission(requiredPermission);
@@ -349,10 +341,7 @@ function showView(viewName) {
 
     if (viewName === "report") {
       if (typeof initReportControls === "function") initReportControls();
-      const campaignPanel = document.getElementById("campaignReportsPanel");
-      if (campaignPanel && !campaignPanel.classList.contains("d-none") && typeof renderCampaignReportsPanel === "function") {
-        renderCampaignReportsPanel();
-      }
+      if (typeof renderDailyReport === "function") renderDailyReport();
     }
 
     if (viewName === "aisettings") {
@@ -403,10 +392,6 @@ function showView(viewName) {
       // Static documentation view; no Firebase read required.
     }
 
-    if (viewName === "auditlog") {
-      if (typeof renderAuditLog === "function") renderAuditLog();
-    }
-
     if (viewName === "callaudit") {
       if (typeof renderCallAuditDashboard === "function") {
         renderCallAuditDashboard();
@@ -420,14 +405,6 @@ function showView(viewName) {
         renderCampaignsView();
       } else {
         console.error("Campaign Management renderer is not loaded: campaigns.js");
-      }
-    }
-
-    if (viewName === "campaignreports") {
-      if (typeof renderCampaignReportsPanel === "function") {
-        renderCampaignReportsPanel();
-      } else {
-        console.error("Campaign Reports renderer is not loaded: campaign-reports.js");
       }
     }
 
@@ -684,56 +661,6 @@ function _getLeaveIconClass(leaveType) {
   if (leaveType === "Work From Home") return "availability-icon-wfh";
   if (leaveType === "Half Day Morning" || leaveType === "Half Day Afternoon") return "availability-icon-half";
   return "availability-icon-leave";
-}
-
-// ── Audit Log ─────────────────────────────────────────────────
-async function renderAuditLog() {
-  const wrap = document.getElementById("auditLogBody");
-  if (!wrap) return;
-
-  wrap.innerHTML = `<div class="text-center text-muted py-4">
-    <span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>`;
-
-  try {
-    const snap = await auditLogRef.orderBy("timestamp", "desc").limit(200).get();
-    if (snap.empty) {
-      wrap.innerHTML = `<p class="text-muted">No audit entries yet.</p>`;
-      return;
-    }
-
-    const rows = [];
-    snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
-
-    wrap.innerHTML = `
-    <div class="table-card">
-      <div class="table-responsive">
-        <table class="table align-middle table-hover mb-0" style="font-size:13px">
-          <thead>
-            <tr>
-              <th>Date &amp; Time</th>
-              <th>Lead #</th>
-              <th>Action</th>
-              <th>Reason</th>
-              <th>Actor</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map(r => `
-            <tr>
-              <td class="text-nowrap">${r.timestamp ? formatDateTime(r.timestamp.toDate()) : "—"}</td>
-              <td>${r.slNo || "—"}</td>
-              <td><span class="badge audit-badge-${_auditBadgeClass(r.action)}">${escapeHtml(r.action)}</span></td>
-              <td>${escapeHtml(r.reason || "—")}</td>
-              <td>${escapeHtml(r.actor || "System")}</td>
-            </tr>`).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-  } catch (err) {
-    console.error("Audit log load failed:", err);
-    wrap.innerHTML = `<p class="text-danger">Failed to load audit log.</p>`;
-  }
 }
 
 function _auditBadgeClass(action) {

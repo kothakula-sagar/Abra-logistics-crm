@@ -59,7 +59,6 @@
   const callAuditsRef = firestoreAvailable ? db.collection("callAudits") : null;
   const notificationsRef = firestoreAvailable ? db.collection("notifications") : null;
   const assignmentQueueRef = firestoreAvailable ? db.collection("assignmentQueue") : null;
-  const auditLogRef = firestoreAvailable ? db.collection("auditLog") : null;
   const leavesRef = firestoreAvailable ? db.collection("leaves") : null;
   const trainingCategoriesRef = firestoreAvailable ? db.collection("trainingCategories") : null;
   const trainingsRef = firestoreAvailable ? db.collection("trainings") : null;
@@ -78,7 +77,6 @@
   window.callAuditsRef = callAuditsRef;
   window.notificationsRef = notificationsRef;
   window.assignmentQueueRef = assignmentQueueRef;
-  window.auditLogRef = auditLogRef;
   window.leavesRef = leavesRef;
   window.trainingCategoriesRef = trainingCategoriesRef;
   window.trainingsRef = trainingsRef;

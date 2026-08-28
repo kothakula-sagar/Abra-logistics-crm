@@ -358,8 +358,12 @@ function refreshLeadDependentViews() {
 }
 
 async function loadLeadsView() {
-  await refreshActiveMembers();
-  await refreshActiveHR();
+  // Team lists are only needed by staff. Members/HR already have their
+  // lead scope enforced by Firestore and should not list every user profile.
+  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'superadmin') {
+    await refreshActiveMembers();
+    await refreshActiveHR();
+  }
   await loadUserTablePreferences(); // Load user preferences first
   buildLeadFilterUI();
   buildPaginationControls();
@@ -752,8 +756,6 @@ async function assignLeadToHRDirectly(leadId, leadData, noteText, approvalMetada
       read: false
     });
   }
-
-  await writeAuditLog(leadId, leadData.slNo, "HR Transfer Assigned", `Assigned to ${hrUser.name || hrUser.email}`, CURRENT_USER.name || CURRENT_USER.email);
   toast(`Assigned lead to HR ${hrUser.name || hrUser.email}.`, "success");
   renderHRTransferRequests();
 }
@@ -803,8 +805,6 @@ async function rejectHRTransfer(leadId) {
       timestamp: new Date().toISOString()
     })
   });
-
-  await writeAuditLog(leadId, leadData.slNo, "HR Transfer Rejected", `Rejected by ${CURRENT_USER.name || CURRENT_USER.email}: ${reason}`, CURRENT_USER.name || CURRENT_USER.email);
   toast("HR transfer request rejected and lead status restored.", "info");
   renderHRTransferRequests();
 }

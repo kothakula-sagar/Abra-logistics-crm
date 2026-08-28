@@ -141,7 +141,7 @@ function renderCampaignsView() {
       <p class="page-subtitle">Create campaign lead forms, and manage campaign lifecycle — Admins select a campaign when adding a lead, no code changes needed.</p>
     </div>
     ${isSA ? `
-    <button class="btn btn-brand" onclick="openCampaignModal()">
+    <button class="btn btn-brand" onclick="openCampaignBuilderModal()">
       <i class="bi bi-plus-lg me-1"></i>Create Campaign
     </button>` : ""}
   </div>
@@ -185,7 +185,7 @@ function renderCampaignsView() {
                 <button class="btn btn-outline-primary" title="Manage Fields" onclick="openFieldBuilderModal('${c.id}')" ${isArchived ? "disabled" : ""}>
                   <i class="bi bi-ui-checks-grid"></i>
                 </button>
-                <button class="btn btn-outline-secondary" title="Edit" onclick="openCampaignModal('${c.id}')" ${isArchived ? "disabled" : ""}>
+                <button class="btn btn-outline-secondary" title="Edit" onclick="openCampaignBuilderModal('${c.id}')" ${isArchived ? "disabled" : ""}>
                   <i class="bi bi-pencil-square"></i>
                 </button>
                 <button class="btn btn-outline-info" title="Clone" onclick="cloneCampaign('${c.id}')">
@@ -236,7 +236,7 @@ function renderCampaignsView() {
 }
 
 // ── Create / Edit Campaign ───────────────────────────────────
-function openCampaignModal(campaignId) {
+function openCampaignBuilderModal(campaignId) {
   const c = campaignId ? ALL_CAMPAIGNS.find((x) => x.id === campaignId) : null;
   if (c && getCampaignStatus(c) === "archived") {
     toast("Archived campaigns are read-only. Restore it first to edit.", "warning");

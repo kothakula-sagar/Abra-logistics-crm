@@ -83,13 +83,6 @@
       ]
     },
     {
-      "collectionGroup": "auditLog",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "timestamp", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "assignmentQueue",
       "queryScope": "COLLECTION",
       "fields": [

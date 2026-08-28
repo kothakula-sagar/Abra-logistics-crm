@@ -1339,7 +1339,7 @@ function renderEnterpriseApprovalModal(transfer, lead, callAudits) {
                         <tr>
                           <td>#${callAudits.length - idx}</td>
                           <td>${audit.createdAt ? formatDateTime(audit.createdAt.toDate()) : '—'}</td>
-                          <td>${formatDuration(audit.recordingDuration)}</td>
+                          <td>${formatRecordingDuration(audit.recordingDuration)}</td>
                           <td><span class="badge ${getCallStatusBadge(audit.status)}">${escapeHtml(audit.status || 'Unknown')}</span></td>
                           <td>
                             ${audit.recordingUrl ? `
@@ -1439,7 +1439,7 @@ function getCallStatusBadge(status) {
   return statusMap[status] || 'bg-secondary';
 }
 
-function formatDuration(seconds) {
+function formatRecordingDuration(seconds) {
   if (!seconds) return '—';
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -1509,9 +1509,6 @@ window.confirmEnterpriseApproval = async function(transferId) {
       })
     });
     
-    // Write to existing audit log
-    await writeAuditLog(transfer.leadId, transfer.slNo, "HR Transfer Approved", 
-      `Approved by ${CURRENT_USER.name || CURRENT_USER.email}`, CURRENT_USER.name || CURRENT_USER.email);
     
     // Now use existing assignment engine to assign to HR
     await assignToHRUsingAssignmentEngine(transferId, transfer);
@@ -1682,9 +1679,6 @@ window.rejectHRTransfer = async function(transferId) {
     // Send notifications
     await sendHRTransferNotifications(transferId, "rejected", reason);
     
-    // Audit log
-    await writeAuditLog(transfer.leadId, transfer.slNo, "HR Transfer Rejected", 
-      `Rejected by ${CURRENT_USER.name || CURRENT_USER.email}: ${reason}`, CURRENT_USER.name || CURRENT_USER.email);
     
     // Reload and re-render
     await loadHRTransfers();
