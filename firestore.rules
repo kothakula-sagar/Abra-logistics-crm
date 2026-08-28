@@ -1,0 +1,764 @@
+// ============================================================
+// FIRESTORE SECURITY RULES
+// ============================================================
+//
+// COMPOSITE INDEX REQUIRED
+// The member-scoped leads query uses:
+//   .where("assignedTo", "==", uid).orderBy("slNo", "desc")
+//
+// Create this index in Firebase Console:
+//
+//   Collection: leads
+//   Fields:
+//      assignedTo  Ascending
+//      slNo        Descending
+//
+// Or deploy via firestore.indexes.json.
+// ============================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // AUTH / ROLE HELPERS
+    // ============================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Get the currently signed-in user's profile.
+    //
+    // IMPORTANT:
+    // The /users rules below allow a user to read their OWN
+    // document directly. This prevents a circular permission
+    // problem when myUserDoc() is used by other collections.
+    function myUserDoc() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+    }
+
+    function myRole() {
+      return isSignedIn()
+        && myUserDoc().data.active == true
+        ? myUserDoc().data.role
+        : null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && myRole() == 'superadmin';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && myRole() == 'admin';
+    }
+
+    function isMember() {
+      return isSignedIn() && myRole() == 'member';
+    }
+
+    function isHR() {
+      return isSignedIn() && myRole() == 'hr';
+    }
+
+    function isMarketing() {
+      return isSignedIn() && myRole() == 'marketing';
+    }
+
+    function isStaff() {
+      return isSuperAdmin() || isAdmin();
+    }
+
+    // Member and HR share the same "own assigned leads only" access
+    // pattern throughout the leads collection.
+    function isOwnLeadScopedRole() {
+      return isMember() || isHR();
+    }
+
+
+    // ============================================================
+    // AI SETTINGS PROTECTION
+    // ============================================================
+    //
+    // Returns true when the write touches ONLY the aiSettings
+    // field and nothing else.
+    //
+    // This prevents normal users from modifying:
+    //   role
+    //   active
+    //   email
+    //   name
+    //   permissions
+    //   etc.
+    //
+    // They can modify only their own aiSettings.
+    // ============================================================
+
+    function isAISettingsUpdateOnly() {
+      let incoming = request.resource.data
+        .diff(resource.data)
+        .affectedKeys();
+
+      return incoming.hasOnly(['aiSettings']);
+    }
+
+
+    // ============================================================
+    // USERS
+    // ============================================================
+    //
+    // FIX:
+    //
+    // Previously:
+    //
+    //   allow read: if isSignedIn()
+    //     && myUserDoc().data.active == true;
+    //
+    // This caused a problem because reading /users/{uid}
+    // required reading /users/{uid} again through myUserDoc().
+    //
+    // Now:
+    //
+    // 1. Every authenticated user can GET their own profile.
+    // 2. Every active authenticated user can LIST the team.
+    // 3. Super Admin has full management access.
+    // ============================================================
+
+    match /users/{userId} {
+
+      // ----------------------------------------------------------
+      // READ ONE USER DOCUMENT
+      // ----------------------------------------------------------
+      //
+      // A user can read their own profile.
+      //
+      // This is required during login:
+      //
+      // signInWithEmailAndPassword()
+      //       ↓
+      // get /users/{uid}
+      //
+      allow get: if isSignedIn()
+        && request.auth.uid == userId;
+
+
+      // ----------------------------------------------------------
+      // READ USER LIST / TEAM LIST
+      // ----------------------------------------------------------
+      //
+      // Active authenticated users can read the team list.
+      //
+      // Used by the CRM for:
+      // - Assignment dropdowns
+      // - Member names
+      // - Team information
+      // - Lead assignment
+      //
+      allow list: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+
+      // ----------------------------------------------------------
+      // CREATE USER
+      // ----------------------------------------------------------
+      //
+      // Only Super Admin can create users.
+      //
+      allow create: if isSuperAdmin();
+
+
+      // ----------------------------------------------------------
+      // DELETE USER
+      // ----------------------------------------------------------
+      //
+      // Only Super Admin can delete users.
+      //
+      allow delete: if isSuperAdmin();
+
+
+      // ----------------------------------------------------------
+      // UPDATE USER
+      // ----------------------------------------------------------
+      //
+      // Super Admin:
+      //   Full update access.
+      //
+      // Normal authenticated user:
+      //   Can update ONLY their own aiSettings.
+      //
+      allow update: if isSuperAdmin()
+        || (
+          isSignedIn()
+          && request.auth.uid == userId
+          && isAISettingsUpdateOnly()
+        );
+    }
+
+
+    // ============================================================
+    // LEADS
+    // ============================================================
+
+    match /leads/{leadId} {
+
+      // ----------------------------------------------------------
+      // READ
+      // ----------------------------------------------------------
+      //
+      // Admin / Super Admin:
+      //   Can read all leads.
+      //
+      // Member / HR:
+      //   Can read only leads assigned to themselves.
+      //
+      allow read: if isStaff()
+        || (
+          isOwnLeadScopedRole()
+          && resource.data.assignedTo == request.auth.uid
+        );
+
+
+      // ----------------------------------------------------------
+      // CREATE
+      // ----------------------------------------------------------
+      //
+      // Only Admin / Super Admin can create leads.
+      //
+      allow create: if isStaff();
+
+
+      // ----------------------------------------------------------
+      // DELETE
+      // ----------------------------------------------------------
+      //
+      // Admin / Super Admin can delete leads.
+      //
+      allow delete: if isSuperAdmin() || isAdmin();
+
+
+      // ----------------------------------------------------------
+      // UPDATE
+      // ----------------------------------------------------------
+      //
+      // Super Admin / Admin:
+      //   Can update anything.
+      //
+      // Member / HR:
+      //   Can update their assigned lead, but cannot modify
+      //   protected lead identity / assignment fields.
+      //
+      // NOTE: every protected-field comparison below uses .get(field, null)
+      // instead of direct dot-access. Some older leads were created without
+      // campaign association, so campaignId/campaignName/campaignData are
+      // genuinely absent (not just null) on those documents. Direct access
+      // to a truly-absent map key throws in Firestore rules, which silently
+      // denies the WHOLE update — this was blocking Members from updating
+      // any lead that predates campaign tracking, unrelated to role at all.
+      allow update: if isSuperAdmin()
+        || isAdmin()
+        || (
+          isOwnLeadScopedRole()
+
+          && resource.data.assignedTo == request.auth.uid
+
+          // Member cannot transfer the lead.
+          && request.resource.data.get('assignedTo', null)
+             == resource.data.get('assignedTo', null)
+
+          // Protected customer information.
+          && request.resource.data.get('fullName', null)
+             == resource.data.get('fullName', null)
+
+          && request.resource.data.get('phoneNumber', null)
+             == resource.data.get('phoneNumber', null)
+
+          && request.resource.data.get('email', null)
+             == resource.data.get('email', null)
+
+          && request.resource.data.get('companyName', null)
+             == resource.data.get('companyName', null)
+
+          && request.resource.data.get('serviceNeeded', null)
+             == resource.data.get('serviceNeeded', null)
+
+          // Protected lead numbering.
+          && request.resource.data.get('slNo', null)
+             == resource.data.get('slNo', null)
+
+          // Protected campaign information.
+          && request.resource.data.get('campaignId', null)
+             == resource.data.get('campaignId', null)
+
+          && request.resource.data.get('campaignName', null)
+             == resource.data.get('campaignName', null)
+
+          && request.resource.data.get('campaignData', null)
+             == resource.data.get('campaignData', null)
+        );
+    }
+
+
+    // ============================================================
+    // META
+    // ============================================================
+    //
+    // Used for:
+    // - Counters
+    // - Round-robin assignment
+    // - Other CRM metadata
+    //
+    // Admin / Super Admin only.
+    // ============================================================
+
+    match /meta/{docId} {
+
+      allow read: if isStaff();
+
+      allow write: if isStaff();
+    }
+
+
+    // ============================================================
+    // DELETED LEADS AUDIT
+    // ============================================================
+    //
+    // Stores audit information for deleted leads.
+    //
+    // Only Super Admin can access this collection.
+    // ============================================================
+
+    match /deletedLeadsAudit/{docId} {
+
+      allow read: if isSuperAdmin();
+
+      allow create: if isSuperAdmin();
+
+      allow update, delete: if false;
+    }
+
+
+    // ============================================================
+    // CRM SETTINGS
+    // ============================================================
+    //
+    // All settings live in:
+    //
+    //   crmSettings/general
+    //
+    // Read:
+    //   Every active authenticated user.
+    //
+    // Write:
+    //   Super Admin only.
+    //
+    // Settings can include:
+    // - Office hours
+    // - Working days
+    // - Holidays
+    // - Assignment settings
+    // - Reminder settings
+    // - Maximum Not Picking Call attempts
+    // - Other CRM configuration
+    // ============================================================
+
+    match /crmSettings/{docId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update: if isSuperAdmin();
+
+      allow delete: if isSuperAdmin();
+    }
+
+
+    // ============================================================
+    // ASSIGNMENT QUEUE
+    // ============================================================
+    //
+    // Holds leads waiting for assignment because of:
+    //
+    // - Outside office hours
+    // - Holiday
+    // - No available members
+    // - Other assignment restrictions
+    //
+    // Staff create/delete/update queue entries.
+    // Active users can read queue information.
+    // ============================================================
+
+    match /assignmentQueue/{docId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create: if isStaff();
+
+      allow delete: if isStaff();
+
+      allow update: if isStaff();
+    }
+
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+    //
+    // Append-only log for automatic assignment actions.
+    //
+    // Staff can read.
+    // Active authenticated users can create.
+    // Nobody can modify/delete an existing audit entry.
+    // ============================================================
+
+    match /auditLog/{docId} {
+
+      allow read: if isStaff();
+
+      allow create: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow update, delete: if false;
+    }
+
+
+    // ============================================================
+    // EMPLOYEE LEAVE
+    // ============================================================
+    //
+    // Super Admin + Admin:
+    //   Full CRUD.
+    //
+    // Member:
+    //   Read own leaves.
+    //   Create own leave requests.
+    // ============================================================
+
+    match /leaves/{docId} {
+
+      allow read: if isStaff()
+        || (
+          isMember()
+          && resource.data.memberId == request.auth.uid
+        );
+
+      allow create: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow update: if isStaff();
+
+      allow delete: if isStaff();
+    }
+
+
+    // ============================================================
+    // CALL AUDITS
+    // ============================================================
+    //
+    // Sales Member:
+    //   Create audits.
+    //   Read own audits.
+    //
+    // Admin / Super Admin:
+    //   Read all audits.
+    //   Approve / Reject / Request Re-Call.
+    // ============================================================
+
+    match /callAudits/{auditId} {
+
+      allow read: if isStaff()
+        || (
+          isMember()
+          && resource.data.salesMemberId == request.auth.uid
+        );
+
+      allow create: if isMember()
+        && request.resource.data.salesMemberId
+           == request.auth.uid
+        && request.resource.data.status == "Pending";
+
+      allow update: if isStaff()
+        && request.resource.data.status in [
+          "Approved",
+          "Rejected",
+          "Re-Call Requested"
+        ];
+    }
+
+
+    // ============================================================
+    // CALL AUDIT LOG
+    // ============================================================
+    //
+    // Append-only record of:
+    // - Approvals
+    // - Rejections
+    // - Re-call requests
+    //
+    // Staff can read/create.
+    // Existing records cannot be changed/deleted.
+    // ============================================================
+
+    match /callAuditLog/{docId} {
+
+      allow read: if isStaff();
+
+      allow create: if isStaff();
+
+      allow update, delete: if false;
+    }
+
+
+    // ============================================================
+    // NOTIFICATIONS
+    // ============================================================
+    //
+    // Users can read only their own notifications.
+    //
+    // Admin / Super Admin create notifications.
+    // ============================================================
+
+    match /notifications/{docId} {
+
+      allow read: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+
+      allow create: if isStaff();
+    }
+
+
+    // ============================================================
+    // PERMISSION SETTINGS
+    // ============================================================
+    //
+    // Read:
+    //   Every active authenticated user.
+    //
+    // Write:
+    //   Super Admin only.
+    // ============================================================
+
+    match /permissionSettings/{docId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+
+    // ============================================================
+    // MARKETING CONTACTS + CHANNEL CAMPAIGNS
+    // ============================================================
+    //
+    // All active CRM users can view/add/edit marketing customers and
+    // change channel subscription status. Admin + Super Admin can delete.
+    // Email/WhatsApp campaign data is restricted to Super Admin, Admin,
+    // and Marketing roles.
+    // The client uses this small contact cache instead of issuing
+    // another full /leads query every time a marketing screen opens.
+    // ============================================================
+
+    match /marketingContacts/{contactId} {
+      allow read, create, update: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /emailMarketingCampaigns/{campaignId} {
+      allow read, create, update: if isStaff() || isMarketing();
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /whatsappMarketingCampaigns/{campaignId} {
+      allow read, create, update: if isStaff() || isMarketing();
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+
+    // ============================================================
+    // CAMPAIGNS
+    // ============================================================
+    //
+    // Campaign Form Builder.
+    //
+    // Read:
+    //   Every active authenticated user.
+    //
+    // Write:
+    //   Super Admin only.
+    //
+    // Used for:
+    // - Campaign creation
+    // - Campaign activation
+    // - Campaign deactivation
+    // - Add Lead campaign dropdown
+    // ============================================================
+
+    match /campaigns/{campaignId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+
+    // ============================================================
+    // CAMPAIGN FIELDS
+    // ============================================================
+    //
+    // Stores custom fields for each campaign.
+    //
+    // Read:
+    //   Every active authenticated user.
+    //
+    // Write:
+    //   Super Admin only.
+    // ============================================================
+
+    match /campaignFields/{fieldId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+
+    // ============================================================
+    // HR TRANSFERS
+    // ============================================================
+    //
+    // Leads moved from a Sales Member to HR (Driver/Transporter
+    // status). Created either by the Member whose lead it was, or
+    // directly by staff. Processed (approved/rejected) by HR/staff.
+    //
+    // This collection previously had NO rule at all, which meant
+    // Firestore denied everyone by default (including Super Admin) —
+    // that's the "Failed to load HR Transfers" bug.
+    // ============================================================
+
+    match /hrTransfers/{transferId} {
+
+      allow read: if isStaff()
+        || isHR()
+        || (
+          isMember()
+          && (
+            resource.data.get('salesMemberId', null) == request.auth.uid
+            || resource.data.get('requestedBy', null) == request.auth.uid
+          )
+        );
+
+      allow create: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow update: if isStaff() || isHR();
+
+      allow delete: if isSuperAdmin();
+    }
+
+
+    // ============================================================
+    // SALES ACADEMY / TRAINING
+    // ============================================================
+    //
+    // Training content and categories: browsable by every active
+    // user (Members only see "published" trainings — enforced by
+    // the client query, not by these rules, matching this app's
+    // existing pattern for other shared-read collections).
+    //
+    // Authoring (create/update/delete) is staff-only.
+    // ============================================================
+
+    match /trainingCategories/{categoryId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isStaff();
+    }
+
+    match /trainings/{trainingId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isStaff();
+    }
+
+    match /knowledgeBase/{articleId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isStaff();
+    }
+
+    match /quizzes/{quizId} {
+
+      allow read: if isSignedIn()
+        && myUserDoc().data.active == true;
+
+      allow create, update, delete: if isStaff();
+    }
+
+
+    // ============================================================
+    // TRAINING PROGRESS
+    // ============================================================
+    //
+    // Each user tracks their own progress (doc id is
+    // "{userId}_{trainingId}", always self-written with
+    // userId == the writer's own uid). Staff can read everyone's
+    // progress for reporting.
+    // ============================================================
+
+    match /trainingProgress/{progressId} {
+
+      allow read: if isStaff()
+        || (
+          isSignedIn()
+          && resource.data.get('userId', null) == request.auth.uid
+        );
+
+      allow create: if isSignedIn()
+        && request.resource.data.get('userId', null) == request.auth.uid;
+
+      allow update: if isStaff()
+        || (
+          isSignedIn()
+          && resource.data.get('userId', null) == request.auth.uid
+          && request.resource.data.get('userId', null) == request.auth.uid
+        );
+
+      allow delete: if isStaff();
+    }
+
+
+    // ============================================================
+    // CERTIFICATES
+    // ============================================================
+    //
+    // Issued to a user on training completion. Users read only
+    // their own; only staff issue/manage them.
+    // ============================================================
+
+    match /certificates/{certificateId} {
+
+      allow read: if isStaff()
+        || (
+          isSignedIn()
+          && resource.data.get('userId', null) == request.auth.uid
+        );
+
+      allow create, update, delete: if isStaff();
+    }
+
+  }
+}
