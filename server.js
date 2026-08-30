@@ -551,6 +551,11 @@ async function getCRMSettings() {
 
     reminderAfterMinutes: 30,
 
+    whatsappMarketingMessagesPerBatch: 10,
+    whatsappMarketingCooldownMinutes: 5,
+    emailMarketingMessagesPerBatch: 10,
+    emailMarketingCooldownMinutes: 5,
+
     telegramAlerts: true,
 
     telegramOverdueAlerts: true,
@@ -1667,8 +1672,22 @@ function dailyReportMessage(report, dateKey) {
     `Busy (call again): ${report.callBackLater}`,
     `Not Picking Call: ${report.notPickingCall}`,
     `Pending / Not Contacted: ${report.notOpen}`,
-    ''
+    '',
+    'Marketing activity:',
+    `Email messages initiated: ${report.marketing?.email?.messages || 0}`,
+    `WhatsApp messages initiated: ${report.marketing?.whatsapp?.messages || 0}`
   ];
+
+  for (const [channel, label] of [['email', 'Email'], ['whatsapp', 'WhatsApp']]) {
+    const campaigns = report.marketing?.[channel]?.campaigns || [];
+    if (campaigns.length) {
+      lines.push(`${label} campaigns:`);
+      campaigns.slice(0, 10).forEach((campaign, index) => {
+        lines.push(`${index + 1}. ${campaign.name} — ${campaign.messages}`);
+      });
+    }
+  }
+  lines.push('');
 
   if (report.notOpen > 0) {
     lines.push(`Note: ${report.notOpen} lead(s) are still pending first contact — following up shortly.`);
@@ -1713,7 +1732,11 @@ async function buildDailyReport(dateKey, timezone) {
     jobSeekers: 0,
     callBackLater: 0,
     notPickingCall: 0,
-    topMembers: []
+    topMembers: [],
+    marketing: {
+      email: { messages: 0, campaigns: [] },
+      whatsapp: { messages: 0, campaigns: [] }
+    }
   };
 
   const memberCounts = new Map();
@@ -1776,6 +1799,31 @@ async function buildDailyReport(dateKey, timezone) {
         memberName,
         (memberCounts.get(memberName) || 0) + 1
       );
+    }
+  }
+
+  // Marketing activity is counted from the actual campaign recipient-open records
+  // for the same local date. This keeps the Telegram daily report aligned with
+  // the CRM's current Email + WhatsApp marketing report.
+  for (const [channel, collectionName] of [['email', 'emailMarketingCampaigns'], ['whatsapp', 'whatsappMarketingCampaigns']]) {
+    try {
+      const campaignSnap = await db.collection(collectionName).get();
+      const campaignRows = [];
+      for (const campaignDoc of campaignSnap.docs) {
+        const campaign = campaignDoc.data() || {};
+        let messages = 0;
+        for (const entry of Object.values(campaign.sentRecipients || {})) {
+          const opened = timestampMs(entry?.openedAt);
+          if (opened && localDateKey(new Date(opened), timezone) === dateKey) messages += 1;
+        }
+        if (messages > 0) {
+          campaignRows.push({ name: campaign.name || `${channel === 'email' ? 'Email' : 'WhatsApp'} Campaign`, messages });
+          report.marketing[channel].messages += messages;
+        }
+      }
+      report.marketing[channel].campaigns = campaignRows.sort((a, b) => b.messages - a.messages || a.name.localeCompare(b.name));
+    } catch (error) {
+      console.warn(`Daily ${channel} marketing report query failed:`, error.message);
     }
   }
 
@@ -2452,6 +2500,23 @@ function telegramReportMessage(report, dateKey, title = 'LEAD REPORT') {
     `<b>Total leads received:</b> ${report.total}`,
     ''
   ];
+
+  const marketing = report.marketing || {};
+  lines.push(
+    '<b>📣 Marketing activity</b>',
+    `Email messages initiated: ${marketing.email?.messages || 0}`,
+    `WhatsApp messages initiated: ${marketing.whatsapp?.messages || 0}`
+  );
+  for (const [channel, label] of [['email', 'Email'], ['whatsapp', 'WhatsApp']]) {
+    const campaigns = marketing[channel]?.campaigns || [];
+    if (campaigns.length) {
+      lines.push(`<b>${label} campaigns</b>`);
+      campaigns.slice(0, 10).forEach((campaign, index) => {
+        lines.push(`${index + 1}. ${escapeHtml(campaign.name)} — ${campaign.messages}`);
+      });
+    }
+  }
+  lines.push('');
 
   for (const [label, count] of reportStatusCount(report)) {
     lines.push(`<b>${escapeHtml(label)}:</b> ${count}`);
