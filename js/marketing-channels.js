@@ -217,25 +217,69 @@ function getMarketingCooldown(ch){
 }
 function formatCountdown(ms){const total=Math.max(0,Math.ceil(ms/1000)),m=Math.floor(total/60),s=total%60;return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
 let marketingCountdownTimer=null;
+let marketingCountdownChannel=null;
+let marketingLastAnnouncedKey='';
+function getMarketingAnnouncementKey(ch){
+ const x=getMarketingCooldown(ch);
+ if(x.remaining>0)return '';
+ const campaign=state[ch]?.campaigns?.find(c=>c.id===state[ch]?.activeCampaignId);
+ return `${CURRENT_USER?.uid||'user'}|${ch}|${campaign?.id||'no-campaign'}|${x.total}|${x.limit}`;
+}
+function speakMarketingCooldownComplete(ch){
+ const key=getMarketingAnnouncementKey(ch);
+ if(!key||key===marketingLastAnnouncedKey)return;
+ marketingLastAnnouncedKey=key;
+ const campaign=state[ch]?.campaigns?.find(c=>c.id===state[ch]?.activeCampaignId);
+ if(!campaign||!window.speechSynthesis||typeof window.SpeechSynthesisUtterance!=='function')return;
+ const userName=CURRENT_USER?.name||CURRENT_USER?.email||'there';
+ const marketingName=ch==='whatsapp'?'WhatsApp Marketing':'Email Marketing';
+ const message=`Hey ${userName}, your timer is completed. You can now start ${marketingName} for the ${campaign.name} campaign.`;
+ try{window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(message);utterance.rate=0.95;utterance.pitch=1;window.speechSynthesis.speak(utterance);}catch(e){console.warn('Marketing timer audio could not be played',e)}
+}
 function renderMarketingStatus(ch){
  const root=document.getElementById(`view-${ch}marketing`);if(!root)return;
  let el=root.querySelector('.marketing-send-status');
  if(!el){el=document.createElement('div');el.className='marketing-send-status';root.appendChild(el);}
  const x=getMarketingCooldown(ch),label=ch==='whatsapp'?'WhatsApp':'Email';
- const timing=x.remaining>0?`Resumes in ${formatCountdown(x.remaining)}`:'Window active';
- el.innerHTML=`<strong>${label} Marketing</strong><span>Messages available: ${x.available}/${x.limit}</span><span class="marketing-send-status-timing ${x.remaining>0?'is-paused':''}">${timing}</span>`;
+ const campaign=state[ch]?.campaigns?.find(c=>c.id===state[ch]?.activeCampaignId);
+ const sent=campaign?.sentRecipients||{};
+ const pending=campaign?eligibleContacts(ch).filter(c=>!sent[c.id]).length:eligibleContacts(ch).length;
+ const timing=x.remaining>0?`Can send ${x.available} of ${x.limit} in ${formatCountdown(x.remaining)}`:`Can send ${x.available} of ${x.limit} now`;
+ el.classList.toggle('is-countdown',x.remaining>0);
+ el.classList.toggle('is-available',x.remaining<=0);
+ el.innerHTML=`<strong>${label} Marketing</strong><span>${pending} messages pending / ${x.available} of ${x.limit} can be sent</span><span class="marketing-send-status-timing">${timing}</span>`;
+ if(x.remaining<=0)speakMarketingCooldownComplete(ch);
 }
 function startMarketingCountdown(ch){
  if(marketingCountdownTimer)clearInterval(marketingCountdownTimer);
+ marketingCountdownChannel=ch;
  marketingCountdownTimer=setInterval(()=>{
    renderChannel(ch);
    renderMarketingStatus(ch);
-   if(getMarketingCooldown(ch).remaining<=0){clearInterval(marketingCountdownTimer);marketingCountdownTimer=null;}
+   const current=getMarketingCooldown(ch);
+   if(current.remaining<=0){
+     clearInterval(marketingCountdownTimer);
+     marketingCountdownTimer=null;
+     speakMarketingCooldownComplete(ch);
+   }
  },1000);
 }
 async function openMessage(ch,campaignId,contactId,options={}){const campaign=state[ch].campaigns.find(c=>c.id===campaignId),c=state[ch].contacts.find(x=>x.id===contactId);if(!campaign||!c)return;if(statusOf(c,ch)==='Unsubscribed'){toast?.(`This customer is Unsubscribed for ${ch==='email'?'Email':'WhatsApp'}.`,'warning');return}if(ch==='whatsapp'&&campaign.sentRecipients?.[contactId]){toast?.('This customer has already been sent this WhatsApp campaign.','info');return}{const cooldown=getMarketingCooldown(ch);if(cooldown.remaining>0){toast?.(`${ch==='whatsapp'?'WhatsApp':'Email'} marketing is paused. Please wait ${formatCountdown(cooldown.remaining)}.`,'warning');startMarketingCountdown(ch);return}}const body=replacePlaceholders(campaign.body,c);let url='';if(ch==='email'){const subject=replacePlaceholders(campaign.subject,c);if(!c.email){toast?.('Email address is missing.','warning');return}if(campaign.emailProvider==='Outlook')url=`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;else url=`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`}else{const phone=normalisePhone(c.phone);if(!phone){toast?.('Valid WhatsApp number is missing.','warning');return}url=`https://wa.me/${phone}?text=${encodeURIComponent(body)}`}
 saveMarketingPosition(ch);if(ch==='email'&&campaign.emailProvider==='Outlook')window.location.href=url;else window.open(url,'_blank','noopener,noreferrer');
 const sentRecord={openedAt:new Date(),sentThrough:ch==='email'?(campaign.emailProvider==='Outlook'?'Outlook App':'Gmail'):'WhatsApp',sentBy:CURRENT_USER.uid,sentByName:CURRENT_USER.name||CURRENT_USER.email};campaign.sentRecipients={...(campaign.sentRecipients||{}),[contactId]:sentRecord};renderChannel(ch);restoreMarketingPosition(ch);renderMarketingStatus(ch);if(getMarketingCooldown(ch).remaining>0)startMarketingCountdown(ch);try{await getCampaignRef(ch).doc(campaignId).update({[`sentRecipients.${contactId}`]:{openedAt:firebase.firestore.FieldValue.serverTimestamp(),sentThrough:sentRecord.sentThrough,sentBy:sentRecord.sentBy,sentByName:sentRecord.sentByName}})}catch(e){console.error('Failed to record campaign open',e)}if(options.shortcutIndex)toast?.(`Customer ${c.slNo || options.shortcutIndex}, ${c.name} is opened`,'success');if(window.CRMReport?.refresh)window.CRMReport.refresh()}
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState!=='visible')return;
+ ['whatsapp','email'].forEach(ch=>{
+   const x=getMarketingCooldown(ch);
+   if(x.remaining<=0){
+     renderMarketingStatus(ch);
+     if(marketingCountdownChannel===ch&&marketingCountdownTimer){clearInterval(marketingCountdownTimer);marketingCountdownTimer=null;}
+   }else if(marketingCountdownChannel===ch&&!marketingCountdownTimer){
+     startMarketingCountdown(ch);
+   }
+ });
+});
+
 function visibleChannel(){const e=document.getElementById('view-emailmarketing'),w=document.getElementById('view-whatsappmarketing');if(e&&!e.classList.contains('d-none'))return'email';if(w&&!w.classList.contains('d-none'))return'whatsapp';return null}
 async function openNextRecipient(ch){const s=state[ch],campaign=s.campaigns.find(c=>c.id===s.activeCampaignId);if(!campaign){toast?.(`Open a ${ch==='email'?'email':'WhatsApp'} campaign first.`,'warning');return}const recipients=eligibleContacts(ch),sent=campaign.sentRecipients||{},i=recipients.findIndex(c=>!sent[c.id]);if(i===-1){toast?.(`All ${recipients.length} ${ch==='email'?'email':'WhatsApp'} leads in this campaign are opened.`,'success');return}await openMessage(ch,campaign.id,recipients[i].id,{shortcutIndex:i+1})}
 function bindShortcuts(){if(window.__marketingShortcutsBound)return;window.__marketingShortcutsBound=true;document.addEventListener('keydown',e=>{const modal=document.getElementById('marketingContactModal');const isContactModal=modal?.classList.contains('show');const isCustomers=window.CURRENT_VIEW==='customers'||!document.getElementById('view-customers')?.classList.contains('d-none');const ch=visibleChannel();if(e.altKey&&(e.key==='/'||e.code==='Slash')){if(isCustomers){e.preventDefault();if(!isContactModal)openContactModal('email');}return}if(isContactModal&&!e.altKey&&e.key==='Enter'&&String(e.target?.tagName||'').toLowerCase()!=='textarea'){e.preventDefault();document.getElementById('marketingContactSaveBtn')?.click();return}if(e.altKey&&(e.key==='o'||e.key==='O'||e.code==='KeyO')){if(ch){e.preventDefault();openNextRecipient(ch);}}})}
