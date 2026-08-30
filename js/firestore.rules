@@ -516,10 +516,24 @@ service cloud.firestore {
 
     match /notifications/{docId} {
 
+      // Personal notifications remain private. Management-audience
+      // notifications are visible to active Admin / Super Admin users.
       allow read: if isSignedIn()
-        && resource.data.userId == request.auth.uid;
+        && (
+          resource.data.userId == request.auth.uid
+          || (resource.data.audience == 'management' && isStaff())
+        );
 
-      allow create: if isStaff();
+      // Staff may create the existing notification types. Marketing, Member,
+      // and HR may create only the new management-audience notifications.
+      allow create: if isStaff()
+        || (
+          isSignedIn()
+          && myUserDoc().data.active == true
+          && myRole() in ['marketing', 'member', 'hr']
+          && request.resource.data.audience == 'management'
+          && request.resource.data.createdBy == request.auth.uid
+        );
     }
 
 

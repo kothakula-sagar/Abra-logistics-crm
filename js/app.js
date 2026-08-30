@@ -30,6 +30,7 @@ async function initApp() {
   buildNav();
   showView("leads");
   requestNotificationPermission();
+  subscribeManagementNotifications();
 
   // Subscribe to CRM Settings in real time (all roles)
   subscribeCRMSettings();
@@ -78,6 +79,56 @@ async function initApp() {
   await checkHolidayWelcome();       // show welcome popup if yesterday was a holiday
   await checkAndRunMigration();      // one-time migration: Not Picking Call → No Response
 }
+
+
+// ── Management notifications ─────────────────────────────────
+// Marketing/status events are written to a management audience so every
+// active Admin and Super Admin receives the same message, regardless of
+// which marketing user performed the action.
+let managementNotificationsUnsubscribe = null;
+let managementNotificationsReady = false;
+
+function subscribeManagementNotifications() {
+  if (!window.CURRENT_USER || !['admin', 'superadmin'].includes(window.CURRENT_USER.role) || !window.notificationsRef) return;
+  if (managementNotificationsUnsubscribe) managementNotificationsUnsubscribe();
+  managementNotificationsReady = false;
+  managementNotificationsUnsubscribe = window.notificationsRef
+    .where('audience', '==', 'management')
+    .limit(50)
+    .onSnapshot(snapshot => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type !== 'added') return;
+        const data = change.doc.data() || {};
+        if (!managementNotificationsReady) return;
+        const title = data.title || 'CRM Management Update';
+        const message = String(data.message || '').replace(/\{\{ADMIN_NAME\}\}/g, window.CURRENT_USER.name || window.CURRENT_USER.email || 'Admin');
+        if (typeof toast === 'function') toast(message, 'info');
+        if (typeof browserNotify === 'function') browserNotify(title, message);
+      });
+      managementNotificationsReady = true;
+    }, err => console.error('Management notification listener error:', err));
+}
+
+window.notifyManagement = async function(payload = {}) {
+  if (!window.notificationsRef) return;
+  if (!['marketing', 'member', 'hr'].includes(window.CURRENT_USER?.role)) return;
+  const message = String(payload.message || '');
+  try {
+    await window.notificationsRef.add({
+      audience: 'management',
+      title: payload.title || 'CRM Management Update',
+      message,
+      type: payload.type || 'management-update',
+      metadata: payload.metadata || {},
+      createdBy: window.CURRENT_USER.uid,
+      createdByName: window.CURRENT_USER.name || window.CURRENT_USER.email || 'Team Member',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      read: false
+    });
+  } catch (err) {
+    console.error('Failed to create management notification:', err);
+  }
+};
 
 function syncAddLeadButton() {
   const wrap = document.getElementById("addLeadBtnWrap");

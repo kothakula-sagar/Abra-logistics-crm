@@ -128,13 +128,30 @@ async function setContactStatus(id,channel,value){
  const c=state.email.contacts.find(x=>x.id===id);
  if(!c)return;
  if((channel==='email'&&!String(c.email||'').trim())||(channel==='whatsapp'&&!normalisePhone(c.phone)))return;
+ const previousStatus=channel==='whatsapp'?statusOf(c,'whatsapp'):statusOf(c,'email');
+ if(previousStatus===value)return;
  const payload={updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:CURRENT_USER.uid,updatedByName:CURRENT_USER.name||CURRENT_USER.email};
  if(channel==='whatsapp')payload.whatsappStatus=value;else payload.emailStatus=value;
  const other=channel==='whatsapp'?statusOf(c,'email'):statusOf(c,'whatsapp');
  const nextEmail=channel==='email'?value:other;
  const nextWa=channel==='whatsapp'?value:other;
  payload.marketingStatus=(nextEmail==='Unsubscribed'&&nextWa==='Unsubscribed')?'Unsubscribed':'Subscribed';
- try{await contactsRef().doc(id).update(payload);const updated={...c,...payload,updatedAt:new Date()};state.email.contacts=state.email.contacts.map(x=>x.id===id?updated:x);state.whatsapp.contacts=state.whatsapp.contacts.map(x=>x.id===id?updated:x);notifyContactListeners();renderChannel('email');renderChannel('whatsapp');if(window.CRMReport?.refresh)window.CRMReport.refresh();toast?.(`${channel==='whatsapp'?'WhatsApp':'Email'} status updated.`,'success')}catch(e){console.error(e);toast?.('Failed to update customer status.','danger')}}
+ try{
+  await contactsRef().doc(id).update(payload);
+  const updated={...c,...payload,updatedAt:new Date()};
+  state.email.contacts=state.email.contacts.map(x=>x.id===id?updated:x);
+  state.whatsapp.contacts=state.whatsapp.contacts.map(x=>x.id===id?updated:x);
+  notifyContactListeners();renderChannel('email');renderChannel('whatsapp');if(window.CRMReport?.refresh)window.CRMReport.refresh();
+  if(CURRENT_USER?.role!=='admin'&&CURRENT_USER?.role!=='superadmin'&&window.notifyManagement){
+    window.notifyManagement({
+      title:'Marketing Subscription Status Changed',
+      message:`Hi ${'{{ADMIN_NAME}}'} Sir, your team member ${CURRENT_USER.name||CURRENT_USER.email} has changed ${c.name||'the customer'} to ${value} for ${channel==='whatsapp'?'WhatsApp':'Email'}.`,
+      type:'marketing-status-change',
+      metadata:{customerName:c.name||'—',marketingType:channel==='whatsapp'?'WhatsApp':'Email',newStatus:value,changedBy:CURRENT_USER.name||CURRENT_USER.email}
+    });
+  }
+  toast?.(`${channel==='whatsapp'?'WhatsApp':'Email'} status updated.`,'success');
+ }catch(e){console.error(e);toast?.('Failed to update customer status.','danger')}}
 
 async function saveContact(){
  if(!canEdit())return;
@@ -183,7 +200,7 @@ async function saveContact(){
 async function deleteContact(id){if(!canDelete()||!confirm('Delete this customer?'))return;try{await contactsRef().doc(id).delete();state.email.contacts=state.email.contacts.filter(c=>c.id!==id);state.whatsapp.contacts=state.whatsapp.contacts.filter(c=>c.id!==id);notifyContactListeners();renderChannel('email');renderChannel('whatsapp');if(window.Customers)window.Customers.render();if(window.CRMReport?.refresh)window.CRMReport.refresh();toast?.('Customer deleted.','success')}catch(e){console.error(e);toast?.('Failed to delete customer.','danger')}}
 
 function openCampaignModal(ch,id=''){if(!canEdit())return;const c=id?state[ch].campaigns.find(x=>x.id===id):null;document.getElementById('marketingCampaignModalTitle').textContent=c?'Edit Campaign':'Create Campaign';document.getElementById('marketingCampaignId').value=c?.id||'';document.getElementById('marketingCampaignChannel').value=ch;document.getElementById('marketingCampaignName').value=c?.name||'';document.getElementById('marketingCampaignSubject').value=c?.subject||'';document.getElementById('marketingCampaignEmailProvider').value=c?.emailProvider||'Gmail';document.getElementById('marketingCampaignBody').value=c?.body||'';document.getElementById('marketingCampaignSubjectWrap').classList.toggle('d-none',ch!=='email');document.getElementById('marketingCampaignEmailProviderWrap').classList.toggle('d-none',ch!=='email');document.getElementById('marketingCampaignPlaceholderHelp').textContent=ch==='email'?'Use {{Name}} in the subject or body. It will be replaced for each customer.':'Use {{Name}} in the message. It will be replaced for each customer.';new bootstrap.Modal(document.getElementById('marketingCampaignModal')).show()}
-async function saveCampaign(){if(!canEdit())return;const id=document.getElementById('marketingCampaignId').value.trim(),ch=document.getElementById('marketingCampaignChannel').value,name=document.getElementById('marketingCampaignName').value.trim(),subject=document.getElementById('marketingCampaignSubject').value.trim(),body=document.getElementById('marketingCampaignBody').value.trim(),provider=document.getElementById('marketingCampaignEmailProvider').value==='Outlook'?'Outlook':'Gmail';if(!name||!body){toast?.('Campaign name and body are required.','warning');return}if(ch==='email'&&!subject){toast?.('Email subject is required.','warning');return}const payload={name,subject:ch==='email'?subject:'',body,emailProvider:ch==='email'?provider:'',updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:CURRENT_USER.uid,updatedByName:CURRENT_USER.name||CURRENT_USER.email};try{const btn=document.getElementById('marketingCampaignSaveBtn');btn.disabled=true;const r=getCampaignRef(ch);if(id)await r.doc(id).update(payload);else await r.add({...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:CURRENT_USER.uid,createdByName:CURRENT_USER.name||CURRENT_USER.email,sentRecipients:{}});bootstrap.Modal.getInstance(document.getElementById('marketingCampaignModal'))?.hide();toast?.(id?'Campaign updated.':'Campaign created.','success')}catch(e){console.error(e);toast?.('Failed to save campaign.','danger')}finally{document.getElementById('marketingCampaignSaveBtn').disabled=false}}
+async function saveCampaign(){if(!canEdit())return;const id=document.getElementById('marketingCampaignId').value.trim(),ch=document.getElementById('marketingCampaignChannel').value,name=document.getElementById('marketingCampaignName').value.trim(),subject=document.getElementById('marketingCampaignSubject').value.trim(),body=document.getElementById('marketingCampaignBody').value.trim(),provider=document.getElementById('marketingCampaignEmailProvider').value==='Outlook'?'Outlook':'Gmail';if(!name||!body){toast?.('Campaign name and body are required.','warning');return}if(ch==='email'&&!subject){toast?.('Email subject is required.','warning');return}const payload={name,subject:ch==='email'?subject:'',body,emailProvider:ch==='email'?provider:'',updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:CURRENT_USER.uid,updatedByName:CURRENT_USER.name||CURRENT_USER.email};try{const btn=document.getElementById('marketingCampaignSaveBtn');btn.disabled=true;const r=getCampaignRef(ch);if(id)await r.doc(id).update(payload);else{const created={...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:CURRENT_USER.uid,createdByName:CURRENT_USER.name||CURRENT_USER.email,sentRecipients:{}};const ref=await r.add(created);if(CURRENT_USER?.role==='marketing'&&window.notifyManagement){const marketingName=CURRENT_USER.name||CURRENT_USER.email;const detail=ch==='email'?`Marketing Name: ${marketingName}\nCampaign Name: ${name}\nSubject: ${subject}\nOpen Email With: ${provider}\nBody: ${body}`:`Marketing Name: ${marketingName}\nCampaign Name: ${name}\nBody: ${body}`;window.notifyManagement({title:`New ${ch==='email'?'Email':'WhatsApp'} Marketing Campaign Created`,message:detail,type:'marketing-campaign-created',metadata:{marketingName:CURRENT_USER.name||CURRENT_USER.email,campaignName:name,marketingType:ch,subject:ch==='email'?subject:'',openEmailWith:ch==='email'?provider:'',body}})}}bootstrap.Modal.getInstance(document.getElementById('marketingCampaignModal'))?.hide();toast?.(id?'Campaign updated.':'Campaign created.','success')}catch(e){console.error(e);toast?.('Failed to save campaign.','danger')}finally{document.getElementById('marketingCampaignSaveBtn').disabled=false}}
 async function deleteCampaign(ch,id){if(!canDelete()||!confirm('Delete this campaign? This cannot be undone.'))return;try{await getCampaignRef(ch).doc(id).delete();state[ch].activeCampaignId=null;toast?.('Campaign deleted.','success');renderChannel(ch)}catch(e){console.error(e);toast?.('Failed to delete campaign.','danger')}}
 
 function replacePlaceholders(text,c){const values={name:c.name||'',email:c.email||'',phone:c.phone||'',company:c.company||''};return String(text||'').replace(/\{\{\s*(name|email|phone|company)\s*\}\}/gi,(_,k)=>values[k.toLowerCase()]??'')}
@@ -201,20 +218,24 @@ function getMarketingCooldown(ch){
  const cooldownMs=(ch==='whatsapp'?limits.whatsappCooldownMinutes:limits.emailCooldownMinutes)*60*1000;
  const entries=allSentEntriesByUser(ch);
  const now=Date.now();
- let batchCount=0,remaining=0;
- for(const entry of entries){
-   if(entry.time>now)continue;
-   if(cooldownMs>0 && remaining>0){
-     if(entry.time<now) {
-       if(entry.time < now-remaining) { /* historical entry, handled by time windows below */ }
-     }
-   }
+ if(!entries.length)return {remaining:0,available:limit,limit,total:0};
+ if(cooldownMs<=0)return {remaining:0,available:limit,limit,total:entries.length};
+
+ // A batch starts after the last gap longer than the configured cooldown.
+ // This avoids the old modulo/history bug and makes the countdown use the
+ // timestamp of the actual message that completed the current batch.
+ const latest=entries[entries.length-1];
+ let batchCount=1;
+ for(let i=entries.length-2;i>=0;i--){
+   const gap=latest.time-entries[i].time;
+   if(gap>cooldownMs)break;
    batchCount+=1;
-   if(batchCount===limit){
-     const until=entry.time+cooldownMs;
-     if(until>now){ remaining=until-now; return {remaining,available:0,limit,total:entries.length}; }
-     batchCount=0;
-   }
+   if(batchCount>=limit)break;
+ }
+ if(batchCount>=limit){
+   const until=latest.time+cooldownMs;
+   if(until>now)return {remaining:until-now,available:0,limit,total:entries.length};
+   return {remaining:0,available:limit,limit,total:entries.length};
  }
  return {remaining:0,available:Math.max(0,limit-batchCount),limit,total:entries.length};
 }
@@ -231,10 +252,10 @@ function getMarketingAnnouncementKey(ch){
 function speakMarketingCooldownComplete(ch){
  const key=getMarketingAnnouncementKey(ch);
  if(!key||key===marketingLastAnnouncedKey)return;
- marketingLastAnnouncedKey=key;
  const campaign=state[ch]?.campaigns?.find(c=>c.id===state[ch]?.activeCampaignId);
  const voiceEnabled=getCRMSetting?.('marketingCooldownVoiceAnnouncements')!==false;
  if(!campaign||!voiceEnabled||!window.speechSynthesis||typeof window.SpeechSynthesisUtterance!=='function')return;
+ marketingLastAnnouncedKey=key;
  const userName=CURRENT_USER?.name||CURRENT_USER?.email||'there';
  const marketingName=ch==='whatsapp'?'WhatsApp Marketing':'Email Marketing';
  const message=`Hey ${userName}, your ${marketingName} timer is completed. You can now start the ${campaign.name} campaign.`;
@@ -257,8 +278,7 @@ function renderMarketingStatus(ch){
 function startMarketingCountdown(ch){
  if(marketingCountdownTimer)clearInterval(marketingCountdownTimer);
  marketingCountdownChannel=ch;
- marketingCountdownTimer=setInterval(()=>{
-   renderChannel(ch);
+ const tick=()=>{
    renderMarketingStatus(ch);
    const current=getMarketingCooldown(ch);
    if(current.remaining<=0){
@@ -266,7 +286,9 @@ function startMarketingCountdown(ch){
      marketingCountdownTimer=null;
      speakMarketingCooldownComplete(ch);
    }
- },1000);
+ };
+ tick();
+ marketingCountdownTimer=setInterval(tick,1000);
 }
 async function openMessage(ch,campaignId,contactId,options={}){const campaign=state[ch].campaigns.find(c=>c.id===campaignId),c=state[ch].contacts.find(x=>x.id===contactId);if(!campaign||!c)return;if(statusOf(c,ch)==='Unsubscribed'){toast?.(`This customer is Unsubscribed for ${ch==='email'?'Email':'WhatsApp'}.`,'warning');return}if(ch==='whatsapp'&&campaign.sentRecipients?.[contactId]){toast?.('This customer has already been sent this WhatsApp campaign.','info');return}{const cooldown=getMarketingCooldown(ch);if(cooldown.remaining>0){toast?.(`${ch==='whatsapp'?'WhatsApp':'Email'} marketing is paused. Please wait ${formatCountdown(cooldown.remaining)}.`,'warning');startMarketingCountdown(ch);return}}const body=replacePlaceholders(campaign.body,c);let url='';if(ch==='email'){const subject=replacePlaceholders(campaign.subject,c);if(!c.email){toast?.('Email address is missing.','warning');return}if(campaign.emailProvider==='Outlook')url=`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;else url=`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`}else{const phone=normalisePhone(c.phone);if(!phone){toast?.('Valid WhatsApp number is missing.','warning');return}url=`https://wa.me/${phone}?text=${encodeURIComponent(body)}`}
 saveMarketingPosition(ch);if(ch==='email'&&campaign.emailProvider==='Outlook')window.location.href=url;else window.open(url,'_blank','noopener,noreferrer');
