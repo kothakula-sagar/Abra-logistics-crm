@@ -382,7 +382,8 @@ service cloud.firestore {
           isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'whatsappMarketingMessagesPerBatch', 'whatsappMarketingCooldownMinutes',
-            'emailMarketingMessagesPerBatch', 'emailMarketingCooldownMinutes'
+            'emailMarketingMessagesPerBatch', 'emailMarketingCooldownMinutes',
+            'marketingCooldownVoiceAnnouncements'
           ])
         )
         );

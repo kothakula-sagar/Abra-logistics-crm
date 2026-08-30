@@ -57,6 +57,7 @@ function _defaultConfig() {
     whatsappMarketingCooldownMinutes: 5,
     emailMarketingMessagesPerBatch: 10,
     emailMarketingCooldownMinutes: 5,
+    marketingCooldownVoiceAnnouncements: true,
     // § 9 AI Defaults
     aiProvider:    "Groq",
     aiModel:       "llama-3.3-70b-versatile",
@@ -169,7 +170,7 @@ function renderCRMSettingsView() {
         ${isSA
           ? "All business rules. Changes take effect for every user in real time."
           : (isAdmin
-            ? "Business rules are read-only for Admin. Global CRM font can be changed here."
+            ? "Business rules are read-only for Admin. Global CRM font and marketing timer settings can be changed here."
             : "Current CRM configuration — read-only for your role.")}
       </p>
     </div>
@@ -187,7 +188,7 @@ function renderCRMSettingsView() {
   ${isReadOnly ? `
   <div class="alert crm-readonly-alert mb-4" role="alert">
     <i class="bi bi-info-circle-fill me-2"></i>
-    Business settings are managed by the Super Admin. Admin can change only the Global CRM Font.
+    Business settings are managed by the Super Admin. Admin can change the Global CRM Font and approved marketing timer settings.
   </div>` : ""}
 
   <div class="row g-4">
@@ -467,8 +468,9 @@ function _sectionMarketingLimits(g, canEdit) {
     <div class="col-12 mt-2"><strong class="small">Email Marketing</strong></div>
     <div class="col-6"><label class="form-label small fw-semibold">Messages per batch</label><input type="number" id="cfg_emailMarketingMessages" class="form-control form-control-sm" min="1" max="1000" value="${g.emailMarketingMessagesPerBatch||10}" ${ro}></div>
     <div class="col-6"><label class="form-label small fw-semibold">Cooldown after batch (minutes)</label><input type="number" id="cfg_emailMarketingCooldown" class="form-control form-control-sm" min="0" max="1440" value="${g.emailMarketingCooldownMinutes??5}" ${ro}></div>
+    <div class="col-12 mt-2">${_toggle("cfg_marketingCooldownVoice", "Voice announcement when marketing timer completes", g.marketingCooldownVoiceAnnouncements !== false, ro)}</div>
   </div>
-  ${canEdit ? '<div class="d-flex justify-content-end mt-3"><button class="btn btn-sm btn-brand" onclick="saveMarketingLimits()"><i class="bi bi-floppy-fill me-1"></i>Save Marketing Limits</button></div><div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>Admin and Super Admin can change these marketing limits. Other CRM business settings remain unchanged.</div>' : ''}`;
+  ${canEdit ? '<div class="d-flex justify-content-end mt-3"><button class="btn btn-sm btn-brand" onclick="saveMarketingLimits()"><i class="bi bi-floppy-fill me-1"></i>Save Marketing Settings</button></div><div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>Admin and Super Admin can change the marketing limits and voice announcement setting. These settings apply to every user with Marketing access.</div>' : ''}`;
 }
 
 function _sectionAIDefaults(g, ro) {
@@ -663,12 +665,13 @@ async function saveMarketingLimits() {
     whatsappMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById('cfg_waMarketingCooldown')?.value) || 0),
     emailMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById('cfg_emailMarketingMessages')?.value) || 10),
     emailMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById('cfg_emailMarketingCooldown')?.value) || 0),
+    marketingCooldownVoiceAnnouncements: document.getElementById('cfg_marketingCooldownVoice')?.checked ?? true,
   };
   const btn = document.querySelector('[onclick="saveMarketingLimits()"]');
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Saving…';}
-  try { await CRM_SETTINGS_DOC.set(payload,{merge:true}); toast('Marketing sending limits saved.', 'success'); }
+  try { await CRM_SETTINGS_DOC.set(payload,{merge:true}); toast('Marketing settings saved.', 'success'); }
   catch(err){ console.error('Save marketing limits failed:',err); toast('Failed to save marketing limits.', 'danger'); }
-  finally { if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-floppy-fill me-1"></i>Save Marketing Limits';} }
+  finally { if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-floppy-fill me-1"></i>Save Marketing Settings';} }
 }
 
 // ── Save (Super Admin only) ───────────────────────────────────
@@ -741,6 +744,7 @@ async function saveAllCRMSettings() {
       whatsappMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById("cfg_waMarketingCooldown")?.value) || 0),
       emailMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById("cfg_emailMarketingMessages")?.value) || 10),
       emailMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById("cfg_emailMarketingCooldown")?.value) || 0),
+      marketingCooldownVoiceAnnouncements: document.getElementById("cfg_marketingCooldownVoice")?.checked ?? true,
     };
 
     // Single document write — onSnapshot propagates to all users in real time

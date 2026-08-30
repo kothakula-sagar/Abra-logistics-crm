@@ -189,7 +189,10 @@ async function deleteCampaign(ch,id){if(!canDelete()||!confirm('Delete this camp
 function replacePlaceholders(text,c){const values={name:c.name||'',email:c.email||'',phone:c.phone||'',company:c.company||''};return String(text||'').replace(/\{\{\s*(name|email|phone|company)\s*\}\}/gi,(_,k)=>values[k.toLowerCase()]??'')}
 function allSentEntriesByUser(ch){
  const campaigns=state[ch]?.campaigns||[];
- return campaigns.flatMap(c=>Object.values(c.sentRecipients||{}).filter(x=>x&&x.sentBy===CURRENT_USER?.uid).map(x=>({...x,campaignId:c.id,time:asDate(x.openedAt)?.getTime()||0}))).filter(x=>x.time>0).sort((a,b)=>a.time-b.time);
+ // The marketing limit is shared across every user who has access to this
+ // channel. Each campaign is still tracked separately for its own Sent state,
+ // but the cooldown is calculated from all recorded sends in the channel.
+ return campaigns.flatMap(c=>Object.values(c.sentRecipients||{}).map(x=>({...x,campaignId:c.id,time:asDate(x.openedAt)?.getTime()||0}))).filter(x=>x.time>0).sort((a,b)=>a.time-b.time);
 }
 function getMarketingCooldown(ch){
  if(!CURRENT_USER?.uid)return {remaining:0,available:0,limit:1,total:0};
@@ -230,10 +233,11 @@ function speakMarketingCooldownComplete(ch){
  if(!key||key===marketingLastAnnouncedKey)return;
  marketingLastAnnouncedKey=key;
  const campaign=state[ch]?.campaigns?.find(c=>c.id===state[ch]?.activeCampaignId);
- if(!campaign||!window.speechSynthesis||typeof window.SpeechSynthesisUtterance!=='function')return;
+ const voiceEnabled=getCRMSetting?.('marketingCooldownVoiceAnnouncements')!==false;
+ if(!campaign||!voiceEnabled||!window.speechSynthesis||typeof window.SpeechSynthesisUtterance!=='function')return;
  const userName=CURRENT_USER?.name||CURRENT_USER?.email||'there';
  const marketingName=ch==='whatsapp'?'WhatsApp Marketing':'Email Marketing';
- const message=`Hey ${userName}, your timer is completed. You can now start ${marketingName} for the ${campaign.name} campaign.`;
+ const message=`Hey ${userName}, your ${marketingName} timer is completed. You can now start the ${campaign.name} campaign.`;
  try{window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(message);utterance.rate=0.95;utterance.pitch=1;window.speechSynthesis.speak(utterance);}catch(e){console.warn('Marketing timer audio could not be played',e)}
 }
 function renderMarketingStatus(ch){
