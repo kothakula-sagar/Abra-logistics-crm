@@ -202,8 +202,8 @@
               </div>
             </div>
             <div class="col-6 col-md-3">
-              <label class="form-label small mb-1">Telegram admin recipient</label>
-              <input type="text" id="reportManagerName" class="form-control form-control-sm" placeholder="Admin name (optional)" value="">
+              <label class="form-label small mb-1">Report recipient</label>
+              <input type="text" id="reportManagerName" class="form-control form-control-sm" placeholder="e.g. Sri" value="">
             </div>
             <div class="col-6 col-md-2">
               <button class="btn btn-sm btn-brand w-100" onclick="renderDailyReport()"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
@@ -230,7 +230,7 @@
               <h6 class="mb-0">Professional report message</h6>
               <div>
                 <button class="btn btn-sm btn-outline-secondary" onclick="copyReportMessage()"><i class="bi bi-clipboard"></i> Copy</button>
-                <button class="btn btn-sm btn-success" id="shareReportTelegramBtn" onclick="shareReportOnTelegram()"><i class="bi bi-telegram"></i> Send to Admin on Telegram</button>
+                <button class="btn btn-sm btn-success" onclick="shareReportOnWhatsApp()"><i class="bi bi-whatsapp"></i> Share on WhatsApp</button>
               </div>
             </div>
             <pre id="reportMessageBox" class="report-message-box"></pre>

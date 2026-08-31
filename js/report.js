@@ -339,47 +339,10 @@ function copyReportMessage() {
   navigator.clipboard.writeText(box.textContent).then(() => toast('Report copied to clipboard.', 'success'), () => toast('Could not copy the report.', 'danger'));
 }
 
-async function shareReportOnTelegram() {
-  const box = document.getElementById('reportMessageBox');
-  if (!box) return;
-  const message = String(box.textContent || '').trim();
-  if (!message) {
-    toast('There is no report message to send.', 'warning');
-    return;
-  }
-
-  const button = document.getElementById('shareReportTelegramBtn');
-  const original = button?.innerHTML || '';
-  if (button) {
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending…';
-  }
-
-  try {
-    if (!window.TelegramCRM?.sendReportMessage) {
-      throw new Error('Telegram report service is not available.');
-    }
-    const recipientName = String(document.getElementById('reportManagerName')?.value || '').trim();
-    const data = await window.TelegramCRM.sendReportMessage({ message, recipientName });
-    const recipients = Array.isArray(data.recipients) ? data.recipients : [];
-    toast(
-      recipients.length
-        ? `Report sent to ${recipients.map(r => r.name || r.email || 'Admin').join(', ')} on Telegram.`
-        : 'Report sent on Telegram.',
-      'success'
-    );
-  } catch (error) {
-    toast(error.message || 'Failed to send the report on Telegram.', 'danger');
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.innerHTML = original || '<i class="bi bi-telegram"></i> Send to Admin on Telegram';
-    }
-  }
+function shareReportOnWhatsApp() {
+  const box = document.getElementById('reportMessageBox'); if (!box) return;
+  window.open(`https://wa.me/?text=${encodeURIComponent(box.textContent)}`, '_blank', 'noopener,noreferrer');
 }
-
-// Backward compatibility for any older markup that still calls the old name.
-function shareReportOnWhatsApp() { return shareReportOnTelegram(); }
 
 // Backwards-compatible helpers used by older screens.
 function getLeadsForToday() { const k = reportNowDateKey(); return getLoadedLeads().filter(l => reportDateKey(l.createdAt) === k); }

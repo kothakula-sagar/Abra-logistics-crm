@@ -91,3 +91,34 @@
 @media (max-width: 576px) {
   .marketing-send-status { right: 12px; bottom: 12px; min-width: 220px; }
 }
+
+/* Customer analytics: charts are derived only from the already-loaded customer cache. */
+.customer-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.customer-chart-panel {
+  min-width: 0;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--card, #fff);
+}
+
+.customer-chart-title {
+  font-weight: 700;
+  font-size: .92rem;
+  margin-bottom: .75rem;
+}
+
+.customer-chart-wrap {
+  height: 240px;
+  position: relative;
+}
+
+@media (max-width: 1100px) {
+  .customer-analytics-grid { grid-template-columns: 1fr; }
+  .customer-chart-wrap { height: 220px; }
+}

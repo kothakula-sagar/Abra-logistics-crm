@@ -106,9 +106,6 @@ function subscribeCampaigns() {
 
     refreshLeadCampaignDropdown();
     if (typeof refreshCampaignAnalyticsIfVisible === "function") refreshCampaignAnalyticsIfVisible();
-    if (typeof renderCampaignReportsPanel === "function" && document.getElementById("campaignReportsPanel") && !document.getElementById("campaignReportsPanel").classList.contains("d-none")) {
-      renderCampaignReportsPanel();
-    }
   }, (err) => console.error("Campaigns snapshot error:", err));
 
   campaignFieldsRef.orderBy("displayOrder", "asc").onSnapshot((snap) => {

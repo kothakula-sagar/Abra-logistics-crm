@@ -11,6 +11,7 @@
 
   let search = '';
   let unsubscribeStore = null;
+  let customerCharts = {};
 
   const isAdmin = () => ['admin', 'superadmin'].includes(window.CURRENT_USER?.role);
   const isActive = () => !!window.CURRENT_USER?.active;
@@ -32,6 +33,99 @@
 
   function getCustomers() {
     return window.MarketingChannels?.getContacts?.() || [];
+  }
+
+  function toDate(value) {
+    if (!value) return null;
+    if (value?.toDate) return value.toDate();
+    if (value instanceof Date) return value;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  function dayKey(value) {
+    const d = toDate(value);
+    if (!d) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function lastSevenDays() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Array.from({ length: 7 }, (_, index) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - (6 - index));
+      return {
+        key: dayKey(d),
+        label: d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit' })
+      };
+    });
+  }
+
+  function destroyCustomerCharts() {
+    Object.values(customerCharts).forEach(chart => {
+      try { chart?.destroy(); } catch (_) {}
+    });
+    customerCharts = {};
+  }
+
+  function renderCustomerCharts(customers) {
+    const root = document.getElementById('customerAnalyticsCharts');
+    if (!root || typeof Chart === 'undefined') return;
+    destroyCustomerCharts();
+
+    const days = lastSevenDays();
+    const newCustomers = days.map(day => customers.filter(c => dayKey(c.createdAt) === day.key).length);
+    const emailSubscribed = customers.filter(c => channelStatus(c, 'email') === 'Subscribed').length;
+    const whatsappSubscribed = customers.filter(c => channelStatus(c, 'whatsapp') === 'Subscribed').length;
+    const emailUnsubscribed = customers.filter(c => channelStatus(c, 'email') === 'Unsubscribed').length;
+    const whatsappUnsubscribed = customers.filter(c => channelStatus(c, 'whatsapp') === 'Unsubscribed').length;
+
+    const common = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    };
+
+    const newCtx = document.getElementById('customerNew7DayChart');
+    if (newCtx) {
+      customerCharts.newCustomers = new Chart(newCtx, {
+        type: 'line',
+        data: {
+          labels: days.map(d => d.label),
+          datasets: [{ label: 'New Customers', data: newCustomers, tension: 0.3, fill: true }]
+        },
+        options: common
+      });
+    }
+
+    const subscribedCtx = document.getElementById('customerSubscribedChart');
+    if (subscribedCtx) {
+      customerCharts.subscribed = new Chart(subscribedCtx, {
+        type: 'bar',
+        data: {
+          labels: ['Email', 'WhatsApp'],
+          datasets: [{ label: 'Subscribed', data: [emailSubscribed, whatsappSubscribed] }]
+        },
+        options: common
+      });
+    }
+
+    const unsubscribedCtx = document.getElementById('customerUnsubscribedChart');
+    if (unsubscribedCtx) {
+      customerCharts.unsubscribed = new Chart(unsubscribedCtx, {
+        type: 'bar',
+        data: {
+          labels: ['Email', 'WhatsApp'],
+          datasets: [{ label: 'Unsubscribed', data: [emailUnsubscribed, whatsappUnsubscribed] }]
+        },
+        options: common
+      });
+    }
   }
 
   function render() {
@@ -71,6 +165,19 @@
         <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Email Subscribed</span><strong>${emailSubscribed}</strong></div></div>
         <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Manual Customers</span><strong>${customers.filter(c=>c.source!=='lead').length}</strong></div></div>
       </div>
+      <div class="marketing-card customer-analytics-card mb-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <div class="marketing-card-title">Customer Analytics</div>
+            <div class="small text-muted">Last 7 days · Based only on the customers already loaded in the CRM · No date selection</div>
+          </div>
+        </div>
+        <div id="customerAnalyticsCharts" class="customer-analytics-grid">
+          <div class="customer-chart-panel"><div class="customer-chart-title">New Customers · Last 7 Days</div><div class="customer-chart-wrap"><canvas id="customerNew7DayChart"></canvas></div></div>
+          <div class="customer-chart-panel"><div class="customer-chart-title">Subscribed Customers</div><div class="customer-chart-wrap"><canvas id="customerSubscribedChart"></canvas></div></div>
+          <div class="customer-chart-panel"><div class="customer-chart-title">Unsubscribed Customers</div><div class="customer-chart-wrap"><canvas id="customerUnsubscribedChart"></canvas></div></div>
+        </div>
+      </div>
       <div class="marketing-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div><div class="marketing-card-title">Customer Directory</div><div class="small text-muted">${filtered.length} of ${customers.length} customers</div></div>
@@ -84,6 +191,7 @@
       </div>`;
 
     requestAnimationFrame(() => {
+      renderCustomerCharts(customers);
       const table = document.querySelector('.customers-table-scroll');
       if (table) table.scrollTop = savedTableScrollTop;
       setCustomersPageScrollTop(savedPageScrollTop);
