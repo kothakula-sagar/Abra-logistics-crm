@@ -856,7 +856,7 @@ async function sendToMember(
 
       text,
 
-      parse_mode: 'HTML',
+      ...(options.parseMode === null ? {} : { parse_mode: options.parseMode || 'HTML' }),
 
       disable_web_page_preview:
         true,
@@ -3909,6 +3909,147 @@ app.post(
 
         error:
           error.message
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// TELEGRAM REPORT SHARING API
+// ============================================================
+// Sends the exact text shown in the Professional report message to
+// a connected Admin / Super Admin Telegram account. The frontend
+// never receives the bot token and cannot call Telegram directly.
+
+app.post(
+  '/api/telegram/share-report',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      if (!isAdminOrSuperAdmin(req.crmUser)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Only Admin and Super Admin users can send reports to Telegram.'
+        });
+      }
+
+      const message = String(req.body?.message || '').trim();
+      const recipientName = String(req.body?.recipientName || '').trim();
+
+      if (!message) {
+        return res.status(400).json({
+          ok: false,
+          error: 'The professional report message is empty.'
+        });
+      }
+
+      if (message.length > 50000) {
+        return res.status(400).json({
+          ok: false,
+          error: 'The report message is too long to send.'
+        });
+      }
+
+      const users = await getManagementTelegramUsers();
+      if (!users.length) {
+        return res.status(409).json({
+          ok: false,
+          error: 'No connected Admin or Super Admin Telegram account was found.'
+        });
+      }
+
+      let recipients = users;
+      if (recipientName) {
+        const wanted = recipientName.toLowerCase();
+        recipients = users.filter(user => {
+          const name = String(user.name || '').trim().toLowerCase();
+          const email = String(user.email || '').trim().toLowerCase();
+          return name === wanted || email === wanted;
+        });
+
+        if (!recipients.length) {
+          return res.status(404).json({
+            ok: false,
+            error: `No connected Admin/Super Admin Telegram account was found for "${recipientName}".`
+          });
+        }
+      }
+
+      const shareId = `report_share_${req.firebaseUser.uid}_${Date.now()}`
+        .replace(/[^a-zA-Z0-9_-]/g, '_');
+      const sentRecipients = [];
+      const failedRecipients = [];
+
+      for (const user of recipients) {
+        try {
+          const chunks = splitTelegramMessage(message);
+          let sentAll = true;
+          let reason = '';
+
+          for (const chunk of chunks) {
+            const result = await sendToMember(user.id, chunk, { parseMode: null });
+            if (!result.sent) {
+              sentAll = false;
+              reason = result.reason || 'send-failed';
+              break;
+            }
+          }
+
+          if (sentAll) {
+            sentRecipients.push({
+              id: user.id,
+              name: firstNonEmpty(user.name, user.email, 'Admin'),
+              email: user.email || ''
+            });
+          } else {
+            failedRecipients.push({
+              id: user.id,
+              name: firstNonEmpty(user.name, user.email, 'Admin'),
+              reason
+            });
+          }
+        } catch (error) {
+          failedRecipients.push({
+            id: user.id,
+            name: firstNonEmpty(user.name, user.email, 'Admin'),
+            reason: error.message
+          });
+        }
+      }
+
+      if (sentRecipients.length) {
+        await db.collection('telegramReportShares').doc(shareId).set({
+          createdAt: FieldValue.serverTimestamp(),
+          sentBy: req.firebaseUser.uid,
+          sentByName: firstNonEmpty(req.crmUser.name, req.crmUser.email, req.firebaseUser.uid),
+          recipientName: recipientName || null,
+          recipients: sentRecipients,
+          failedRecipients,
+          message
+        });
+      }
+
+      if (!sentRecipients.length) {
+        return res.status(502).json({
+          ok: false,
+          error: failedRecipients[0]?.reason || 'Telegram could not deliver the report.',
+          failedRecipients
+        });
+      }
+
+      res.json({
+        ok: true,
+        shareId,
+        sentCount: sentRecipients.length,
+        recipients: sentRecipients,
+        failedRecipients
+      });
+    } catch (error) {
+      console.error('Telegram professional report share error:', error.message);
+      res.status(isFirestoreQuotaError(error) ? 503 : 500).json({
+        ok: false,
+        error: publicFirebaseError(error)
       });
     }
   }

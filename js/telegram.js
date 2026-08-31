@@ -185,6 +185,13 @@
     }
   }
 
+  async function sendReportMessage(payload = {}) {
+    return telegramApi('/api/telegram/share-report', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   async function sendTelegramTestMessage() {
     try {
       await telegramApi('/api/telegram/test', { method: 'POST', body: '{}' });
@@ -410,4 +417,5 @@
   window.refreshTeamOverdue = refreshTeamOverdue;
   window.notifyTeamOverdue = notifyTeamOverdue;
   window.refreshTeamNotificationHistory = refreshTeamNotificationHistory;
+  window.TelegramCRM = { sendReportMessage };
 })();
