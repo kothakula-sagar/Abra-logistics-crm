@@ -1929,6 +1929,209 @@ async function sendDailyManagementReport() {
 
 
 // ============================================================
+// REAL-TIME MANAGEMENT TELEGRAM NOTIFICATIONS
+// ============================================================
+// The marketing UI writes management-audience events to the
+// `notifications` collection. This server listener forwards only the
+// marketing events to every connected Admin / Super Admin Telegram account.
+// This keeps Telegram delivery server-side and independent of which CRM
+// page the management user currently has open.
+
+let managementNotificationListenerStarted = false;
+let managementNotificationInitialSnapshotComplete = false;
+
+function managementTelegramNotificationMessage(data, recipient) {
+  const metadata = data?.metadata || {};
+  const type = String(data?.type || '').trim();
+  const adminName = firstNonEmpty(
+    recipient?.name,
+    recipient?.email,
+    'Admin'
+  );
+
+  if (type === 'marketing-campaign-created') {
+    const marketingType =
+      metadata.marketingType === 'email' ? 'Email Marketing' : 'WhatsApp Marketing';
+    const lines = [
+      '📣 <b>NEW MARKETING CAMPAIGN CREATED</b>',
+      '',
+      `<b>Hi ${escapeHtml(adminName)} Sir,</b>`,
+      '',
+      `<b>Marketing Name:</b> ${escapeHtml(metadata.marketingName || data.createdByName || '—')}`,
+      `<b>Marketing Type:</b> ${escapeHtml(marketingType)}`,
+      `<b>Campaign Name:</b> ${escapeHtml(metadata.campaignName || '—')}`
+    ];
+
+    if (metadata.marketingType === 'email') {
+      lines.push(
+        `<b>Subject:</b> ${escapeHtml(metadata.subject || '—')}`,
+        `<b>Open Email With:</b> ${escapeHtml(metadata.openEmailWith || '—')}`
+      );
+    }
+
+    lines.push(
+      `<b>Body:</b> ${escapeHtml(metadata.body || data.message || '—')}`
+    );
+
+    if (PUBLIC_BASE_URL) {
+      lines.push(
+        '',
+        `<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`
+      );
+    }
+
+    return lines.join('\n');
+  }
+
+  if (type === 'marketing-status-change') {
+    const marketingType =
+      metadata.marketingType === 'email' ? 'Email' : 'WhatsApp';
+    const changedBy = firstNonEmpty(
+      metadata.changedBy,
+      data.createdByName,
+      'Team member'
+    );
+    const customerName = firstNonEmpty(
+      metadata.customerName,
+      'the customer'
+    );
+    const newStatus = firstNonEmpty(
+      metadata.newStatus,
+      'updated'
+    );
+
+    const lines = [
+      '🔔 <b>MARKETING SUBSCRIPTION STATUS UPDATED</b>',
+      '',
+      `Hi ${escapeHtml(adminName)} Sir,`,
+      `Your team member <b>${escapeHtml(changedBy)}</b> has changed <b>${escapeHtml(customerName)}</b> to <b>${escapeHtml(newStatus)}</b> for <b>${escapeHtml(marketingType)}</b>.`
+    ];
+
+    if (PUBLIC_BASE_URL) {
+      lines.push(
+        '',
+        `<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`
+      );
+    }
+
+    return lines.join('\n');
+  }
+
+  return null;
+}
+
+async function forwardManagementNotificationToTelegram(
+  notificationId,
+  data
+) {
+  const type = String(data?.type || '').trim();
+
+  if (
+    type !== 'marketing-campaign-created' &&
+    type !== 'marketing-status-change'
+  ) {
+    return;
+  }
+
+  const users = await getManagementTelegramUsers();
+
+  if (!users.length) {
+    console.log(
+      `ℹ️ No connected Admin/Super Admin Telegram accounts for management notification: ${notificationId}`
+    );
+    return;
+  }
+
+  for (const user of users) {
+    const deliveryId =
+      `management_notification_${notificationId}_${user.id}`
+        .replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const claimed = await claimDelivery(deliveryId, {
+      type: 'managementNotification',
+      notificationId,
+      memberId: user.id,
+      notificationType: type
+    });
+
+    if (!claimed) continue;
+
+    try {
+      const text = managementTelegramNotificationMessage(data, user);
+
+      if (!text) continue;
+
+      const result = await sendToMember(user.id, text);
+
+      if (!result.sent) {
+        await db.collection('telegramDeliveries').doc(deliveryId).delete().catch(() => {});
+        continue;
+      }
+
+      console.log(
+        `📨 Telegram management notification sent: ${notificationId} -> ${user.id}`
+      );
+    } catch (error) {
+      await db.collection('telegramDeliveries').doc(deliveryId).delete().catch(() => {});
+      console.error(
+        `Telegram management notification failed for ${notificationId} -> ${user.id}:`,
+        error.message
+      );
+    }
+  }
+}
+
+function startManagementNotificationRealtimeListener() {
+  if (managementNotificationListenerStarted) return;
+
+  managementNotificationListenerStarted = true;
+  managementNotificationInitialSnapshotComplete = false;
+
+  console.log('👂 Starting realtime marketing management Telegram notification listener...');
+
+  db.collection('notifications')
+    .where('audience', '==', 'management')
+    .onSnapshot(
+      snapshot => {
+        const tasks = [];
+
+        snapshot.docChanges().forEach(change => {
+          if (change.type !== 'added') return;
+
+          // Do not resend notifications that were already present when the
+          // server started. New documents after the initial snapshot are sent.
+          if (!managementNotificationInitialSnapshotComplete) return;
+
+          tasks.push(
+            forwardManagementNotificationToTelegram(
+              change.doc.id,
+              { id: change.doc.id, ...change.doc.data() }
+            )
+          );
+        });
+
+        managementNotificationInitialSnapshotComplete = true;
+
+        if (tasks.length) {
+          Promise.allSettled(tasks).catch(error => {
+            console.error(
+              'Management Telegram notification batch error:',
+              error.message
+            );
+          });
+        }
+      },
+      error => {
+        console.error(
+          'Management Telegram notification listener error:',
+          error.message
+        );
+      }
+    );
+}
+
+
+// ============================================================
 // TELEGRAM DELIVERY CLAIM
 // ============================================================
 
@@ -4283,6 +4486,10 @@ app.listen(
       // This makes Interested / Not Interested alerts independent of the
       // reminder scan interval.
       startLeadStatusRealtimeListener();
+
+      // Forward management-audience marketing events created by the CRM UI
+      // to every connected Admin / Super Admin Telegram account.
+      startManagementNotificationRealtimeListener();
 
       await runNotificationCycle();
 
