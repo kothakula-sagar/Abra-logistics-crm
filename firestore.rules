@@ -392,7 +392,6 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'maintenanceMode'
           ])
-        )
         );
 
       allow delete: if isSuperAdmin();
