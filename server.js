@@ -556,6 +556,8 @@ async function getCRMSettings() {
     emailMarketingMessagesPerBatch: 10,
     emailMarketingCooldownMinutes: 5,
 
+    maintenanceMode: false,
+
     telegramAlerts: true,
 
     telegramOverdueAlerts: true,

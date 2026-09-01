@@ -5,6 +5,7 @@ const contactsRef=()=>db.collection('marketingContacts');
 const emailCampaignsRef=()=>db.collection('emailMarketingCampaigns');
 const whatsappCampaignsRef=()=>db.collection('whatsappMarketingCampaigns');
 const state={email:{contacts:[],campaigns:[],activeCampaignId:null,search:''},whatsapp:{contacts:[],campaigns:[],activeCampaignId:null,search:''}};
+const marketingCharts={email:{},whatsapp:{}};
 let contactCacheLoaded=false,contactLoadPromise=null,contactUnsubscribe=null,emailCampaignUnsubscribe=null,whatsappCampaignUnsubscribe=null;
 const contactListeners=new Set();
 const isAdmin=()=>['admin','superadmin'].includes(window.CURRENT_USER?.role);
@@ -57,8 +58,64 @@ function renderChannel(ch){
  if(active){renderCampaignDetail(ch,active,body,{tableScrollTop:savedTableScrollTop,pageScrollTop:savedPageScrollTop});return}
  const q=s.search.toLowerCase();
  const rows=s.campaigns.filter(c=>`${c.name} ${c.subject||''} ${c.body||''}`.toLowerCase().includes(q));
- body.innerHTML=`<div class="marketing-stats-row"><div class="marketing-stat"><span>Campaigns</span><strong>${s.campaigns.length}</strong></div><div class="marketing-stat"><span>Subscribed recipients</span><strong>${eligibleContacts(ch).length}</strong></div><div class="marketing-stat"><span>Opened from CRM</span><strong>${s.campaigns.reduce((n,c)=>n+Object.keys(c.sentRecipients||{}).length,0)}</strong></div></div><div class="marketing-card"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3"><div><div class="marketing-card-title">${ch==='email'?'Email':'WhatsApp'} Campaigns</div><div class="small text-muted">No pagination. Scroll inside the table.</div></div><input class="form-control marketing-search" placeholder="Search campaigns..." value="${esc(s.search)}" oninput="window.MarketingChannels.setSearch('${ch}',this.value)"></div><div class="crm-scroll-table marketing-campaigns-scroll"><table class="table align-middle marketing-table mb-0"><thead><tr><th>Campaign</th><th>${ch==='email'?'Subject':'Message'}</th><th>Recipients</th><th>Opened</th><th>Sent Through</th><th>Added</th><th>Actions</th></tr></thead><tbody>${rows.length?campaignRows(ch,rows):`<tr><td colspan="7" class="text-center py-5 text-muted">${q?'No campaigns found.':'No campaigns yet.'}</td></tr>`}</tbody></table></div></div>`;
+ body.innerHTML=`<div class="marketing-stats-row"><div class="marketing-stat"><span>Campaigns</span><strong>${s.campaigns.length}</strong></div><div class="marketing-stat"><span>Subscribed recipients</span><strong>${eligibleContacts(ch).length}</strong></div><div class="marketing-stat"><span>Opened from CRM</span><strong>${s.campaigns.reduce((n,c)=>n+Object.keys(c.sentRecipients||{}).length,0)}</strong></div></div>${marketingAnalyticsMarkup(ch)}<div class="marketing-card"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3"><div><div class="marketing-card-title">${ch==='email'?'Email':'WhatsApp'} Campaigns</div><div class="small text-muted">No pagination. Scroll inside the table.</div></div><input class="form-control marketing-search" placeholder="Search campaigns..." value="${esc(s.search)}" oninput="window.MarketingChannels.setSearch('${ch}',this.value)"></div><div class="crm-scroll-table marketing-campaigns-scroll"><table class="table align-middle marketing-table mb-0"><thead><tr><th>Campaign</th><th>${ch==='email'?'Subject':'Message'}</th><th>Recipients</th><th>Opened</th><th>Sent Through</th><th>Added</th><th>Actions</th></tr></thead><tbody>${rows.length?campaignRows(ch,rows):`<tr><td colspan="7" class="text-center py-5 text-muted">${q?'No campaigns found.':'No campaigns yet.'}</td></tr>`}</tbody></table></div></div>`;
+ renderMarketingAnalytics(ch);
  restoreScrollPosition(ch,savedTableScrollTop,savedPageScrollTop);
+}
+
+function marketingDateKey(value){
+ const d=asDate(value);
+ if(!d||Number.isNaN(d.getTime()))return '';
+ return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+}
+function marketingLast7Days(){
+ const todayKey=marketingDateKey(new Date());
+ const today=new Date(`${todayKey}T12:00:00`);
+ const out=[];
+ for(let i=6;i>=0;i--){const d=new Date(today);d.setDate(today.getDate()-i);const key=d.toISOString().slice(0,10);out.push({key,label:d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})});}
+ return out;
+}
+function marketingSendEntries(ch){
+ return (state[ch]?.campaigns||[]).flatMap(c=>Object.entries(c.sentRecipients||{}).map(([contactId,entry])=>({
+   campaign:c,contactId,time:entry?.openedAt||entry?.sentAt||entry?.timestamp
+ }))).filter(x=>asDate(x.time));
+}
+function marketingAnalyticsMarkup(ch){
+ const label=ch==='email'?'Email':'WhatsApp';
+ return `<div class="marketing-analytics-section">
+   <div class="d-flex justify-content-between align-items-end gap-2 flex-wrap mb-3">
+     <div><div class="marketing-analytics-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Last 7 Days ${label} Marketing Charts</div><div class="small text-muted">Based only on campaigns and message sends already loaded in this CRM session.</div></div>
+     <span class="badge bg-light text-dark">7-day rolling view</span>
+   </div>
+   <div class="marketing-analytics-grid">
+     <div class="marketing-chart-panel"><div class="marketing-chart-title">Created Campaigns</div><div class="marketing-chart-subtitle">Campaigns created each day</div><div class="marketing-chart-wrap"><canvas id="${ch}CreatedCampaignsChart"></canvas></div></div>
+     <div class="marketing-chart-panel"><div class="marketing-chart-title">Individual Campaigns</div><div class="marketing-chart-subtitle">Messages sent / opened by campaign</div><div class="marketing-chart-wrap"><canvas id="${ch}CampaignSendsChart"></canvas></div></div>
+     <div class="marketing-chart-panel"><div class="marketing-chart-title">Daily Sending Trend</div><div class="marketing-chart-subtitle">Total messages sent / opened per day</div><div class="marketing-chart-wrap"><canvas id="${ch}DailySendsChart"></canvas></div></div>
+   </div>
+ </div>`;
+}
+function destroyMarketingCharts(ch){
+ Object.values(marketingCharts[ch]||{}).forEach(chart=>{try{chart?.destroy()}catch(_){}});
+ marketingCharts[ch]={};
+}
+function renderMarketingAnalytics(ch){
+ if(typeof Chart==='undefined')return;
+ const root=document.getElementById(`view-${ch}marketing`);
+ if(!root)return;
+ destroyMarketingCharts(ch);
+ const days=marketingLast7Days(), keys=days.map(d=>d.key), entries=marketingSendEntries(ch);
+ const createdCounts=keys.map(key=>(state[ch].campaigns||[]).filter(c=>marketingDateKey(c.createdAt)===key).length);
+ const dailySendCounts=keys.map(key=>entries.filter(e=>marketingDateKey(e.time)===key).length);
+ const campaignCounts=(state[ch].campaigns||[]).map(c=>({name:c.name||'Unnamed Campaign',count:Object.values(c.sentRecipients||{}).filter(e=>keys.includes(marketingDateKey(e?.openedAt||e?.sentAt||e?.timestamp))).length})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count);
+ const campaignNames=campaignCounts.length?campaignCounts.map(x=>x.name):['No sends in last 7 days'];
+ const campaignValues=campaignCounts.length?campaignCounts.map(x=>x.count):[0];
+ const base={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}};
+ const createdCanvas=document.getElementById(`${ch}CreatedCampaignsChart`);
+ const campaignCanvas=document.getElementById(`${ch}CampaignSendsChart`);
+ const dailyCanvas=document.getElementById(`${ch}DailySendsChart`);
+ if(createdCanvas)marketingCharts[ch].created=new Chart(createdCanvas,{type:'bar',data:{labels:days.map(d=>d.label),datasets:[{label:'Campaigns',data:createdCounts,borderWidth:1,borderRadius:6}]},options:{...base}});
+ if(campaignCanvas)marketingCharts[ch].campaigns=new Chart(campaignCanvas,{type:'bar',data:{labels:campaignNames,datasets:[{label:'Messages',data:campaignValues,borderWidth:1,borderRadius:6}]},options:{...base,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{ticks:{autoSkip:false}}}}});
+ if(dailyCanvas)marketingCharts[ch].daily=new Chart(dailyCanvas,{type:'line',data:{labels:days.map(d=>d.label),datasets:[{label:'Messages',data:dailySendCounts,tension:.3,fill:true,pointRadius:4,borderWidth:2}]},options:{...base,elements:{point:{hoverRadius:6}}}});
 }
 
 function restoreScrollPosition(ch,tableScrollTop,pageScrollTop){

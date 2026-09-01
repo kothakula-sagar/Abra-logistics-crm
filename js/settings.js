@@ -71,6 +71,8 @@ function _defaultConfig() {
     // § 11 Global CRM Font
     fontFamily:  "Inter",
     fontGoogleUrl: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+    // § 12 CRM Maintenance Mode
+    maintenanceMode: false,
   };
 }
 
@@ -199,6 +201,7 @@ function renderCRMSettingsView() {
       ${_card("bi-cup-hot",       "Break Timings",  _sectionBreaks(g, ro, isSA))}
       ${_card("bi-calendar-x",    "Holidays",       _sectionHolidays(g, ro, isSA))}
       ${_card("bi-globe",         "System Settings",_sectionSystem(g, ro))}
+      ${_card("bi-tools",         "Maintenance Mode", _sectionMaintenanceMode(g, isSA || isAdmin))}
     </div>
     <div class="col-12 col-xl-6">
       ${_card("bi-arrow-repeat",  "Follow-up Settings",    _sectionFollowUp(g, ro))}
@@ -473,6 +476,28 @@ function _sectionMarketingLimits(g, canEdit) {
   ${canEdit ? '<div class="d-flex justify-content-end mt-3"><button class="btn btn-sm btn-brand" onclick="saveMarketingLimits()"><i class="bi bi-floppy-fill me-1"></i>Save Marketing Settings</button></div><div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>Admin and Super Admin can change the marketing limits and voice announcement setting. These settings apply to every user with Marketing access.</div>' : ''}`;
 }
 
+function _sectionMaintenanceMode(g, canEdit) {
+  const disabled = canEdit ? "" : "disabled";
+  const active = g.maintenanceMode === true;
+  return `
+  <div class="maintenance-settings-panel ${active ? "is-on" : ""}">
+    <div class="d-flex justify-content-between align-items-start gap-3">
+      <div>
+        <div class="fw-semibold">Close CRM for non-admin users</div>
+        <div class="small text-muted mt-1">When enabled, Sales Members, HR and Marketing users can still log in, but the CRM is locked to a maintenance message. Admin and Super Admin continue to have full access.</div>
+      </div>
+      <div class="form-check form-switch flex-shrink-0">
+        <input class="form-check-input" type="checkbox" id="cfg_maintenanceMode" ${active ? "checked" : ""} ${disabled} onchange="saveMaintenanceMode()">
+      </div>
+    </div>
+    <div class="mt-3 small ${active ? "text-danger fw-semibold" : "text-muted"}">
+      <i class="bi ${active ? "bi-exclamation-triangle-fill" : "bi-shield-check"} me-1"></i>
+      ${active ? "Maintenance mode is currently ON for non-admin users." : "Maintenance mode is currently OFF."}
+      ${canEdit ? "Changes are saved immediately." : ""}
+    </div>
+  </div>`;
+}
+
 function _sectionAIDefaults(g, ro) {
   return `
   <p class="small text-muted mb-3">Users can override these in their own AI Settings.</p>
@@ -674,6 +699,26 @@ async function saveMarketingLimits() {
   finally { if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-floppy-fill me-1"></i>Save Marketing Settings';} }
 }
 
+async function saveMaintenanceMode() {
+  const role = CURRENT_USER?.role;
+  if (role !== "superadmin" && role !== "admin") {
+    toast("Only Super Admin or Admin can change maintenance mode.", "danger");
+    return;
+  }
+  const enabled = document.getElementById("cfg_maintenanceMode")?.checked === true;
+  const btn = document.querySelector('[onclick="saveMaintenanceMode()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…'; }
+  try {
+    await CRM_SETTINGS_DOC.set({ maintenanceMode: enabled }, { merge: true });
+    toast(enabled ? "Maintenance mode enabled for non-admin users." : "Maintenance mode disabled. All users can use the CRM again.", "success");
+  } catch (err) {
+    console.error("Save maintenance mode failed:", err);
+    toast("Failed to update maintenance mode.", "danger");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-floppy-fill me-1"></i>Save Maintenance Mode'; }
+  }
+}
+
 // ── Save (Super Admin only) ───────────────────────────────────
 async function saveAllCRMSettings() {
   if (!requirePermission("crmSettings.edit")) return;
@@ -745,6 +790,7 @@ async function saveAllCRMSettings() {
       emailMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById("cfg_emailMarketingMessages")?.value) || 10),
       emailMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById("cfg_emailMarketingCooldown")?.value) || 0),
       marketingCooldownVoiceAnnouncements: document.getElementById("cfg_marketingCooldownVoice")?.checked ?? true,
+      maintenanceMode: document.getElementById("cfg_maintenanceMode")?.checked ?? false,
     };
 
     // Single document write — onSnapshot propagates to all users in real time

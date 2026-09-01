@@ -156,6 +156,19 @@ function rebuildPermissionAwareNav() {
 
 function buildNav() {
   const nav     = document.getElementById("sideNav");
+  if (window.isMaintenanceModeActive?.() && CURRENT_USER && !["admin", "superadmin"].includes(CURRENT_USER.role)) {
+    nav.innerHTML = `
+      <a href="#" class="nav-link nav-item-link active" data-view="dashboard">
+        <i class="bi bi-speedometer2"></i> Dashboard
+      </a>`;
+    nav.querySelectorAll(".nav-item-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        showView("dashboard");
+      });
+    });
+    return;
+  }
   const isSA    = CURRENT_USER.role === "superadmin";
   const canViewLeads = isSA || hasPermission("leads.view");
   const canViewDashboard = !!CURRENT_USER?.active;
@@ -338,6 +351,9 @@ function buildNav() {
 
 function canAccessView(viewName) {
   if (!viewName) return false;
+  if (window.isMaintenanceModeActive?.() && CURRENT_USER && !["admin", "superadmin"].includes(CURRENT_USER.role)) {
+    return viewName === "dashboard";
+  }
   if (CURRENT_USER && CURRENT_USER.role === "superadmin") return true;
   if (CURRENT_USER?.role === "marketing") return ["dashboard", "customers", "emailmarketing", "whatsappmarketing", "report"].includes(viewName);
   if (CURRENT_USER?.active && ["dashboard", "customers", "docs", "emailmarketing", "whatsappmarketing"].includes(viewName)) return true;

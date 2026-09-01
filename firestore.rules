@@ -378,12 +378,19 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'fontFamily', 'fontGoogleUrl'
           ])
+        )
         || (
           isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'whatsappMarketingMessagesPerBatch', 'whatsappMarketingCooldownMinutes',
             'emailMarketingMessagesPerBatch', 'emailMarketingCooldownMinutes',
             'marketingCooldownVoiceAnnouncements'
+          ])
+        )
+        || (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'maintenanceMode'
           ])
         )
         );
