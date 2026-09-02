@@ -3331,6 +3331,65 @@ app.post(
 
 
 // ============================================================
+// LEAD COUNT (AGGREGATION, NO DOCUMENT DOWNLOAD)
+// ============================================================
+// The Leads page only needs the number of matching leads for pagination.
+// Do not download the entire leads collection just to calculate that number.
+app.get(
+  '/api/leads/count',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      const role = String(req.crmUser?.role || '').toLowerCase();
+      const allowedRoles = new Set(['superadmin', 'admin', 'member', 'hr']);
+      if (!allowedRoles.has(role)) {
+        return res.status(403).json({ ok: false, error: 'Lead count is not available for this role.' });
+      }
+
+      let query = db.collection('leads');
+
+      if (role === 'member' || role === 'hr') {
+        query = query.where('assignedTo', '==', req.firebaseUser.uid);
+      }
+
+      const status = String(req.query.status || '').trim();
+      const assignedTo = String(req.query.assignedTo || '').trim();
+      const campaign = String(req.query.campaign || '').trim();
+      const dateFrom = String(req.query.dateFrom || '').trim();
+      const dateTo = String(req.query.dateTo || '').trim();
+
+      if (status) query = query.where('status', '==', status);
+      if (assignedTo && role !== 'member') query = query.where('assignedTo', '==', assignedTo);
+      if (campaign) query = query.where('campaignName', '==', campaign);
+
+      if (dateFrom) {
+        const from = new Date(`${dateFrom}T00:00:00`);
+        if (!Number.isNaN(from.getTime())) {
+          query = query.where('createdAt', '>=', admin.firestore.Timestamp.fromDate(from));
+        }
+      }
+
+      if (dateTo) {
+        const to = new Date(`${dateTo}T23:59:59`);
+        if (!Number.isNaN(to.getTime())) {
+          query = query.where('createdAt', '<=', admin.firestore.Timestamp.fromDate(to));
+        }
+      }
+
+      // Keep the aggregation query aligned with the Leads page query so it
+      // uses the same Firestore indexes and counts the same result set.
+      query = query.orderBy('createdAt', 'desc');
+
+      const snapshot = await query.count().get();
+      return res.json({ ok: true, count: snapshot.data().count || 0 });
+    } catch (error) {
+      console.error('Lead count aggregation error:', error);
+      return res.status(500).json({ ok: false, error: publicFirebaseError(error) });
+    }
+  }
+);
+
+// ============================================================
 // PROVISION AN EXISTING FIREBASE AUTH ACCOUNT
 // ============================================================
 // A team member may already exist in Firebase Authentication.
