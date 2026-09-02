@@ -29,6 +29,278 @@ const WEBHOOK_SECRET =
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || '*';
 
+const SMTP_HOST = String(process.env.SMTP_HOST || 'mail.abra-logistic.com').trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || (SMTP_PORT === 465 ? 'true' : 'false')).toLowerCase() === 'true';
+const SMTP_USER = String(process.env.SMTP_USER || 'support@abra-logistic.com').trim();
+const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
+const SMTP_FROM = String(process.env.SMTP_FROM || SMTP_USER).trim();
+const SMTP_FROM_NAME = String(process.env.SMTP_FROM_NAME || 'Abra E Logistic PVT. LTD.').trim();
+
+const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
+const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
+const GMAIL_REFRESH_TOKEN = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
+const GMAIL_USER_EMAIL = String(process.env.GMAIL_USER_EMAIL || 'abralogisticsupport@gmail.com').trim();
+const GMAIL_REDIRECT_URI = String(process.env.GMAIL_REDIRECT_URI || `${PUBLIC_BASE_URL}/api/email/gmail/oauth/callback`).trim();
+const gmailOAuthStates = new Map();
+const gmailAccessTokenCache = { token: '', expiresAt: 0 };
+
+function smtpReadResponse(socket) {
+  return new Promise((resolve, reject) => {
+    let buffer = '';
+    const onData = chunk => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split(/\r?\n/);
+      const last = lines.filter(Boolean).at(-1) || '';
+      if (/^\d{3} /.test(last)) {
+        cleanup();
+        const code = Number(last.slice(0, 3));
+        if (code >= 400) reject(new Error(`SMTP ${code}: ${last.slice(4)}`));
+        else resolve({ code, text: buffer });
+      }
+    };
+    const onError = err => { cleanup(); reject(err); };
+    const onClose = () => { cleanup(); reject(new Error('SMTP connection closed unexpectedly.')); };
+    const cleanup = () => {
+      socket.off('data', onData);
+      socket.off('error', onError);
+      socket.off('close', onClose);
+    };
+    socket.on('data', onData);
+    socket.on('error', onError);
+    socket.on('close', onClose);
+  });
+}
+
+async function smtpCommand(socket, command, expected = null) {
+  socket.write(`${command}\r\n`);
+  const response = await smtpReadResponse(socket);
+  if (expected && !expected.includes(response.code)) {
+    throw new Error(`Unexpected SMTP response ${response.code}.`);
+  }
+  return response;
+}
+
+function smtpHeader(value) {
+  return `=?UTF-8?B?${Buffer.from(String(value || ''), 'utf8').toString('base64')}?=`;
+}
+
+function buildMimeMessage({ to, subject, text, html, messageId }) {
+  const boundary = `=_AbraCRM_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const safeText = String(text || '').replace(/\r?\n/g, '\r\n');
+  const safeHtml = String(html || '').replace(/\r?\n/g, '\r\n');
+  const body = [
+    `From: ${smtpHeader(SMTP_FROM_NAME)} <${SMTP_FROM}>`,
+    `To: ${to}`,
+    `Reply-To: ${SMTP_FROM}`,
+    `Subject: ${smtpHeader(subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${messageId}>`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    safeText,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    safeHtml,
+    '',
+    `--${boundary}--`,
+    ''
+  ].join('\r\n');
+  return body.replace(/^\./gm, '..');
+}
+
+
+function base64UrlEncode(value) {
+  return Buffer.from(String(value || ''), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function buildGmailMimeMessage({ to, subject, text, html, messageId }) {
+  const boundary = `=_AbraGmail_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const safeText = String(text || '').replace(/\r?\n/g, '\r\n');
+  const safeHtml = String(html || '').replace(/\r?\n/g, '\r\n');
+  return [
+    `From: ${smtpHeader(GMAIL_USER_EMAIL)} <${GMAIL_USER_EMAIL}>`,
+    `To: ${to}`,
+    `Reply-To: ${GMAIL_USER_EMAIL}`,
+    `Subject: ${smtpHeader(subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${messageId}>`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    safeText,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    safeHtml,
+    '',
+    `--${boundary}--`,
+    ''
+  ].join('\r\n');
+}
+
+function gmailConfigured() {
+  return !!(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_USER_EMAIL);
+}
+
+async function getGmailAccessToken() {
+  if (!gmailConfigured()) {
+    throw new Error('Gmail delivery is not configured. Add GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_USER_EMAIL.');
+  }
+  if (!GMAIL_REFRESH_TOKEN) {
+    const err = new Error('Gmail is not authorized yet. Open the Gmail authorization link in CRM settings and complete Google authorization.');
+    err.code = 'GMAIL_AUTH_REQUIRED';
+    throw err;
+  }
+  if (gmailAccessTokenCache.token && gmailAccessTokenCache.expiresAt > Date.now() + 60000) {
+    return gmailAccessTokenCache.token;
+  }
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: GMAIL_CLIENT_ID,
+      client_secret: GMAIL_CLIENT_SECRET,
+      refresh_token: GMAIL_REFRESH_TOKEN,
+      grant_type: 'refresh_token'
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.access_token) {
+    const reason = data.error_description || data.error || 'Google OAuth token refresh failed.';
+    const err = new Error(reason);
+    err.code = 'GMAIL_TOKEN_REFRESH_FAILED';
+    throw err;
+  }
+  gmailAccessTokenCache.token = data.access_token;
+  gmailAccessTokenCache.expiresAt = Date.now() + Math.max(60, Number(data.expires_in || 3600)) * 1000;
+  return data.access_token;
+}
+
+async function sendGmailEmail({ to, subject, text, html }) {
+  const accessToken = await getGmailAccessToken();
+  const messageId = `${Date.now()}.${Math.random().toString(16).slice(2)}@gmail.com`;
+  const raw = base64UrlEncode(buildGmailMimeMessage({
+    to,
+    subject,
+    text,
+    html,
+    messageId
+  }));
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.id) {
+    const reason = data?.error?.message || 'Gmail API rejected the message.';
+    const err = new Error(reason);
+    err.code = 'GMAIL_SEND_FAILED';
+    throw err;
+  }
+  return { messageId: data.id || messageId };
+}
+
+function cleanupGmailOAuthStates() {
+  const now = Date.now();
+  for (const [state, item] of gmailOAuthStates.entries()) {
+    if (!item || now - item.createdAt > 10 * 60 * 1000) gmailOAuthStates.delete(state);
+  }
+}
+
+function openSmtpSocket() {
+  const net = require('net');
+  const tls = require('tls');
+  if (SMTP_SECURE) {
+    return new Promise((resolve, reject) => {
+      const socket = tls.connect({ host: SMTP_HOST, port: SMTP_PORT, servername: SMTP_HOST, minVersion: 'TLSv1.2' }, () => resolve(socket));
+      socket.setTimeout(30000, () => socket.destroy(new Error('SMTP connection timed out.')));
+      socket.once('error', reject);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: SMTP_HOST, port: SMTP_PORT });
+    socket.once('connect', () => resolve(socket));
+    socket.setTimeout(30000, () => socket.destroy(new Error('SMTP connection timed out.')));
+    socket.once('error', reject);
+  });
+}
+
+async function sendSmtpEmail({ to, subject, text, html }) {
+  if (!SMTP_PASS) throw new Error('SMTP email sending is not configured. Add SMTP_PASS in the server environment.');
+  let socket = await openSmtpSocket();
+  const messageId = `${Date.now()}.${Math.random().toString(16).slice(2)}@${SMTP_HOST}`;
+  try {
+    await smtpReadResponse(socket);
+    let ehlo = await smtpCommand(socket, `EHLO abra-logistic.com`, [250]);
+    if (!SMTP_SECURE && /STARTTLS/i.test(ehlo.text)) {
+      await smtpCommand(socket, 'STARTTLS', [220]);
+      const tls = require('tls');
+      const secureSocket = await new Promise((resolve, reject) => {
+        const wrapped = tls.connect({ socket, servername: SMTP_HOST, minVersion: 'TLSv1.2' }, () => resolve(wrapped));
+        wrapped.once('error', reject);
+      });
+      socket = secureSocket;
+      await smtpCommand(socket, 'EHLO abra-logistic.com', [250]);
+    }
+    let authResult;
+    try {
+      const plain = Buffer.from(`\0${SMTP_USER}\0${SMTP_PASS}`, 'utf8').toString('base64');
+      authResult = await smtpCommand(socket, `AUTH PLAIN ${plain}`, [235]);
+    } catch (_) {
+      await smtpCommand(socket, 'AUTH LOGIN', [334]);
+      await smtpCommand(socket, Buffer.from(SMTP_USER, 'utf8').toString('base64'), [334]);
+      await smtpCommand(socket, Buffer.from(SMTP_PASS, 'utf8').toString('base64'), [235]);
+    }
+    await smtpCommand(socket, `MAIL FROM:<${SMTP_FROM}>`, [250]);
+    await smtpCommand(socket, `RCPT TO:<${to}>`, [250, 251]);
+    await smtpCommand(socket, 'DATA', [354]);
+    socket.write(`${buildMimeMessage({ to, subject, text, html, messageId })}\r\n.\r\n`);
+    await smtpReadResponse(socket);
+    await smtpCommand(socket, 'QUIT', [221]);
+    return { messageId };
+  } finally {
+    socket.destroy();
+  }
+}
+
+function sanitizeServerEmailHtml(html = '') {
+  let value = String(html || '').trim();
+  value = value.replace(/<\/?(?:script|iframe|object|embed|form|input|button|textarea|select|style)[^>]*>/gi, '');
+  value = value.replace(/<[^>]+\s(?:on[a-z]+|srcdoc)\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)/gi, '');
+  value = value.replace(/\s(?:on[a-z]+|srcdoc)\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)/gi, '');
+  value = value.replace(/(href|src)\s*=\s*(\"|')\s*javascript:[^\"']*(\"|')/gi, '$1=$2#$3');
+  value = value.replace(/(href|src)\s*=\s*javascript:[^\s>]+/gi, '$1="#"');
+  return value;
+}
+
+function buildEmailHtmlDocument(html = '') {
+  const clean = sanitizeServerEmailHtml(html);
+  return `<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"></head><body style=\"margin:0;padding:0;background:#ffffff;\"><div style=\"margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#333333;\">${clean}</div></body></html>`;
+}
+
 const REMINDER_SCAN_MS =
   Number(process.env.TELEGRAM_REMINDER_SCAN_MS || 300000);
 
@@ -446,6 +718,32 @@ function timestampMs(value) {
 // ============================================================
 // FIREBASE AUTHENTICATION MIDDLEWARE
 // ============================================================
+
+async function verifyFirebaseTokenOnly(
+  req,
+  res,
+  next
+) {
+  try {
+    const authHeader = req.headers.authorization || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Firebase ID token is required.'
+      });
+    }
+
+    const idToken = authHeader.slice(7);
+    req.firebaseUser = await admin.auth().verifyIdToken(idToken);
+    next();
+  } catch (error) {
+    console.error('Firebase token verification error:', error.message);
+    return res.status(401).json({
+      ok: false,
+      error: 'Invalid or expired Firebase session.'
+    });
+  }
+}
 
 async function verifyFirebaseUser(
   req,
@@ -3331,63 +3629,126 @@ app.post(
 
 
 // ============================================================
-// LEAD COUNT (AGGREGATION, NO DOCUMENT DOWNLOAD)
+// SEND HTML EMAIL FROM CRM
 // ============================================================
-// The Leads page only needs the number of matching leads for pagination.
-// Do not download the entire leads collection just to calculate that number.
-app.get(
-  '/api/leads/count',
-  verifyFirebaseUser,
+// Uses the authenticated CRM user and the configured SMTP mailbox.
+// The recipient's Outlook/Gmail/Roundcube receives a real text/html MIME part,
+// so formatting is rendered by the mail client instead of being flattened into text.
+app.post(
+  '/api/email/send',
+  verifyFirebaseTokenOnly,
   async (req, res) => {
     try {
-      const role = String(req.crmUser?.role || '').toLowerCase();
-      const allowedRoles = new Set(['superadmin', 'admin', 'member', 'hr']);
-      if (!allowedRoles.has(role)) {
-        return res.status(403).json({ ok: false, error: 'Lead count is not available for this role.' });
+      const to = String(req.body?.to || '').trim();
+      const subject = String(req.body?.subject || '').trim();
+      const html = String(req.body?.html || '').trim();
+      const text = String(req.body?.text || '').trim();
+      const provider = String(req.body?.provider || 'CRM').trim().toUpperCase();
+
+      if (!to || !subject || !html) {
+        return res.status(400).json({ ok: false, error: 'Recipient, subject, and HTML body are required.' });
+      }
+      const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!validEmail.test(to)) {
+        return res.status(400).json({ ok: false, error: 'Recipient email address is invalid.' });
+      }
+      if (Buffer.byteLength(html, 'utf8') > 500000) {
+        return res.status(413).json({ ok: false, error: 'Email HTML is too large.' });
       }
 
-      let query = db.collection('leads');
-
-      if (role === 'member' || role === 'hr') {
-        query = query.where('assignedTo', '==', req.firebaseUser.uid);
+      const renderedHtml = buildEmailHtmlDocument(html);
+      let info;
+      if (provider === 'GMAIL') {
+        info = await sendGmailEmail({ to, subject, text, html: renderedHtml });
+        return res.json({ ok: true, messageId: info.messageId || '', sentThrough: 'Gmail' });
+      }
+      if (provider !== 'CRM') {
+        return res.status(400).json({ ok: false, error: `Unsupported email provider: ${provider}.` });
       }
 
-      const status = String(req.query.status || '').trim();
-      const assignedTo = String(req.query.assignedTo || '').trim();
-      const campaign = String(req.query.campaign || '').trim();
-      const dateFrom = String(req.query.dateFrom || '').trim();
-      const dateTo = String(req.query.dateTo || '').trim();
-
-      if (status) query = query.where('status', '==', status);
-      if (assignedTo && role !== 'member') query = query.where('assignedTo', '==', assignedTo);
-      if (campaign) query = query.where('campaignName', '==', campaign);
-
-      if (dateFrom) {
-        const from = new Date(`${dateFrom}T00:00:00`);
-        if (!Number.isNaN(from.getTime())) {
-          query = query.where('createdAt', '>=', admin.firestore.Timestamp.fromDate(from));
-        }
-      }
-
-      if (dateTo) {
-        const to = new Date(`${dateTo}T23:59:59`);
-        if (!Number.isNaN(to.getTime())) {
-          query = query.where('createdAt', '<=', admin.firestore.Timestamp.fromDate(to));
-        }
-      }
-
-      // Keep the aggregation query aligned with the Leads page query so it
-      // uses the same Firestore indexes and counts the same result set.
-      query = query.orderBy('createdAt', 'desc');
-
-      const snapshot = await query.count().get();
-      return res.json({ ok: true, count: snapshot.data().count || 0 });
+      info = await sendSmtpEmail({
+        to,
+        subject,
+        text,
+        html: renderedHtml
+      });
+      return res.json({ ok: true, messageId: info.messageId || '', sentThrough: 'CRM Email' });
     } catch (error) {
-      console.error('Lead count aggregation error:', error);
-      return res.status(500).json({ ok: false, error: publicFirebaseError(error) });
+      console.error('HTML email send error:', error);
+      const status = error?.code === 'GMAIL_AUTH_REQUIRED' ? 409 : 500;
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || '',
+        error: error?.message || 'Email could not be sent.'
+      });
     }
   }
 );
+
+// ============================================================
+// GMAIL OAUTH SETUP
+// ============================================================
+app.post('/api/email/gmail/oauth-url', verifyFirebaseTokenOnly, async (req, res) => {
+  try {
+    if (!gmailConfigured()) {
+      return res.status(503).json({ ok: false, error: 'Gmail OAuth is not configured on this server.' });
+    }
+    cleanupGmailOAuthStates();
+    const state = `${Date.now()}_${require('crypto').randomBytes(24).toString('hex')}`;
+    gmailOAuthStates.set(state, { uid: req.firebaseUser.uid, createdAt: Date.now() });
+    const params = new URLSearchParams({
+      client_id: GMAIL_CLIENT_ID,
+      redirect_uri: GMAIL_REDIRECT_URI,
+      response_type: 'code',
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: 'https://www.googleapis.com/auth/gmail.send',
+      state
+    });
+    return res.json({ ok: true, url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
+  } catch (error) {
+    console.error('Gmail OAuth URL error:', error);
+    return res.status(500).json({ ok: false, error: error.message || 'Unable to start Gmail authorization.' });
+  }
+});
+
+app.get('/api/email/gmail/oauth/callback', async (req, res) => {
+  const state = String(req.query?.state || '');
+  const code = String(req.query?.code || '');
+  cleanupGmailOAuthStates();
+  if (!state || !gmailOAuthStates.has(state)) {
+    return res.status(400).send('<h2>Gmail authorization failed</h2><p>Invalid or expired authorization state. Start authorization again from the CRM.</p>');
+  }
+  gmailOAuthStates.delete(state);
+  if (!code) {
+    return res.status(400).send(`<h2>Gmail authorization cancelled</h2><p>${String(req.query?.error || 'No authorization code was returned.')}</p>`);
+  }
+  try {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GMAIL_CLIENT_ID,
+        client_secret: GMAIL_CLIENT_SECRET,
+        redirect_uri: GMAIL_REDIRECT_URI,
+        grant_type: 'authorization_code'
+      })
+    });
+    const data = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok || !data.refresh_token) {
+      throw new Error(data.error_description || data.error || 'Google did not return a refresh token.');
+    }
+    return res.send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:40px;max-width:800px;margin:auto"><h2>Gmail authorization completed</h2><p>Google authorized <strong>${GMAIL_USER_EMAIL}</strong>. Add the following value to the server environment as <code>GMAIL_REFRESH_TOKEN</code>, then restart the CRM server.</p><textarea style="width:100%;height:120px;font-family:monospace" readonly>${data.refresh_token}</textarea><p>Keep this value secret. It grants the CRM permission to send mail from this Gmail account.</p></body></html>`);
+  } catch (error) {
+    console.error('Gmail OAuth callback error:', error);
+    return res.status(500).send(`<h2>Gmail authorization failed</h2><p>${String(error.message || 'Unknown error').replace(/[<>&]/g, '')}</p>`);
+  }
+});
+
+app.get('/api/email/gmail/status', verifyFirebaseTokenOnly, async (req, res) => {
+  return res.json({ ok: true, configured: gmailConfigured(), authorized: !!GMAIL_REFRESH_TOKEN, account: GMAIL_USER_EMAIL });
+});
 
 // ============================================================
 // PROVISION AN EXISTING FIREBASE AUTH ACCOUNT

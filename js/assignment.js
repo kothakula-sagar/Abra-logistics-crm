@@ -14,12 +14,6 @@
 const assignmentQueueRef = db.collection("assignmentQueue");
 const leavesRef          = db.collection("leaves");
 
-// Short-lived in-memory caches prevent the assignment engine from repeatedly
-// downloading the same employee/leave data for every pending lead.
-const ASSIGNMENT_MEMBER_CACHE_TTL = 60 * 1000;
-let assignmentMembersCache = { member: null, hr: null };
-let assignmentLeavesCache = { data: null, timestamp: 0 };
-
 
 function getAssignmentRoleForLead(lead) {
   if (!lead) return DEFAULT_ASSIGNMENT_ROLE;
@@ -42,11 +36,6 @@ function isValidAssignmentTime() {
 
 // ── Fetch today's approved leaves ────────────────────────────
 async function getTodayLeaves() {
-  const nowMs = Date.now();
-  if (assignmentLeavesCache.data && (nowMs - assignmentLeavesCache.timestamp) < ASSIGNMENT_MEMBER_CACHE_TTL) {
-    return assignmentLeavesCache.data;
-  }
-
   const today = new Date().toISOString().slice(0, 10);
   
   // Get single day leaves for today
@@ -74,7 +63,6 @@ async function getTodayLeaves() {
     }
   });
   
-  assignmentLeavesCache = { data: leaves, timestamp: nowMs };
   return leaves;
 }
 
@@ -188,36 +176,24 @@ function isPendingLead(lead) {
 async function getPendingLeadCandidates() {
   if (!leadsRef) return [];
 
-  // Never scan the entire leads collection. Pending assignments are represented
-  // by a small set of legacy/current fields, so query each indexed condition
-  // and merge the results. This is dramatically cheaper as the CRM grows.
-  const pendingQueries = [
-    leadsRef.where("assignmentPending", "==", true),
-    leadsRef.where("assignmentStatus", "==", "pending"),
-    leadsRef.where("assignedTo", "==", "Pending"),
-    leadsRef.where("assignedTo", "==", null),
-    leadsRef.where("assignedTo", "==", ""),
-    leadsRef.where("assignedMemberId", "==", null),
-    leadsRef.where("assignedMember", "==", null)
-  ];
+  const snapshot = await leadsRef.get();
+  if (!snapshot || snapshot.empty) return [];
 
-  const snapshots = await Promise.all(pendingQueries.map(q => q.get()));
   const pendingLeadMap = new Map();
-
-  snapshots.forEach(snapshot => {
-    snapshot.forEach(doc => {
-      const lead = doc.data();
-      if (isPendingLead(lead)) {
-        pendingLeadMap.set(doc.id, { id: doc.id, ...lead });
-      }
-    });
+  snapshot.forEach(doc => {
+    const lead = doc.data();
+    if (isPendingLead(lead)) {
+      pendingLeadMap.set(doc.id, { id: doc.id, ...lead });
+    }
   });
 
-  return Array.from(pendingLeadMap.values()).sort((a, b) => {
+  const pendingLeads = Array.from(pendingLeadMap.values()).sort((a, b) => {
     const aTime = getLeadTimestampValue(a.createdAt || a.assignedAt || a.updatedAt);
     const bTime = getLeadTimestampValue(b.createdAt || b.assignedAt || b.updatedAt);
     return (aTime || 0) - (bTime || 0);
   });
+
+  return pendingLeads;
 }
 
 function getLeadTimestampValue(value) {
@@ -286,16 +262,10 @@ function recalculateLeadState(lead) {
 }
 
 async function getNextAvailableUserByRole(role, todayLeaves) {
-  const cacheKey = role === "hr" ? "hr" : "member";
-  const cache = assignmentMembersCache[cacheKey];
-  if (!cache || (Date.now() - cache.timestamp) >= ASSIGNMENT_MEMBER_CACHE_TTL) {
-    if (role === "hr") {
-      await refreshActiveHR();
-      assignmentMembersCache[cacheKey] = { timestamp: Date.now() };
-    } else {
-      await refreshActiveMembers();
-      assignmentMembersCache[cacheKey] = { timestamp: Date.now() };
-    }
+  if (role === "hr") {
+    await refreshActiveHR();
+  } else {
+    await refreshActiveMembers();
   }
 
   const activeList = role === "hr" ? ACTIVE_HR : ACTIVE_MEMBERS;
@@ -326,7 +296,7 @@ async function getNextAvailableMember(todayLeaves) {
   return getNextAvailableUserByRole("member", todayLeaves);
 }
 
-async function assignLead(leadDoc, cachedTodayLeaves = null) {
+async function assignLead(leadDoc) {
   if (!leadDoc || !leadDoc.id) return false;
 
   console.log("Assigning Lead:");
@@ -343,7 +313,7 @@ async function assignLead(leadDoc, cachedTodayLeaves = null) {
   }
 
   const assignmentRole = getAssignmentRoleForLead(leadData);
-  const todayLeaves = cachedTodayLeaves || await getTodayLeaves();
+  const todayLeaves = await getTodayLeaves();
   const member = await getNextAvailableUserByRole(assignmentRole, todayLeaves);
 
   if (!member) {
@@ -635,9 +605,8 @@ async function assignPendingLeads() {
   }
 
   let assignedCount = 0;
-  const todayLeaves = await getTodayLeaves();
   for (const lead of pendingLeads) {
-    if (await assignLead(lead, todayLeaves)) {
+    if (await assignLead(lead)) {
       assignedCount++;
     }
   }

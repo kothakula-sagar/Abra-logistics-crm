@@ -49,10 +49,12 @@ async function initApp() {
   // Load personal AI settings
   await loadAISettings();
 
-  // Assignment work is admin-only. The old lead-state migration scanned the
-  // entire leads collection on every admin login, so it is no longer part of
-  // the critical startup path. Pending assignment uses targeted queries.
+  // These two run a full unfiltered leads-collection scan, which Firestore
+  // rules only allow for staff (superadmin/admin). Running them for every
+  // role used to throw an uncaught permission-denied for Member/HR and
+  // silently abort the rest of initApp() before loadLeadsView() ever ran.
   if (CURRENT_USER.role === "superadmin" || CURRENT_USER.role === "admin") {
+    await migratePendingAssignmentLeadState();
     await assignPendingLeads();
   }
   if (CURRENT_USER.role !== "marketing") {
@@ -68,13 +70,9 @@ async function initApp() {
     subscribeCallAudits();
   }
 
-  // Start background watchers. Pending assignment is only relevant to the
-  // staff roles that are allowed to assign leads, avoiding background reads
-  // for every member/HR session.
+  // Start background watchers
   startReminderWatcher();
-  if (CURRENT_USER.role === "superadmin" || CURRENT_USER.role === "admin") {
-    startPendingAssignmentPoller();
-  }
+  startPendingAssignmentPoller();
 
   // Post-login checks
   await checkAISetupPrompt();

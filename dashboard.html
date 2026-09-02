@@ -1350,9 +1350,42 @@
             <input type="hidden" id="marketingCampaignChannel" value="email">
             <div class="mb-3"><label class="form-label">Campaign Name <span class="text-danger">*</span></label><input id="marketingCampaignName" class="form-control" placeholder="e.g. Independence Day Sale" required></div>
             <div id="marketingCampaignSubjectWrap" class="mb-3"><label class="form-label">Subject <span class="text-danger">*</span></label><input id="marketingCampaignSubject" class="form-control" placeholder="Hello {{Name}}, special offer for you"></div>
-            <div id="marketingCampaignEmailProviderWrap" class="mb-3"><label class="form-label">Open Email With <span class="text-danger">*</span></label><select id="marketingCampaignEmailProvider" class="form-select"><option value="Gmail">Gmail</option><option value="Outlook">Outlook App</option></select><div class="form-text">When you click Send Email, Gmail opens in the web. Outlook opens the installed/default Outlook desktop app with the recipient, subject, and personalized body prefilled. Make sure Outlook is the default mail app in Windows.</div></div>
-            <div class="mb-2"><label class="form-label">Body <span class="text-danger">*</span></label><textarea id="marketingCampaignBody" class="form-control" rows="9" placeholder="Hi {{Name}}, ..." required></textarea></div>
-            <div id="marketingCampaignPlaceholderHelp" class="form-text">Use {{Name}} to personalize each message.</div>
+            <div id="marketingCampaignEmailProviderWrap" class="mb-3"><label class="form-label">Email Delivery <span class="text-danger">*</span></label><select id="marketingCampaignEmailProvider" class="form-select"><option value="CRM">CRM Email — support@abra-logistic.com</option><option value="Gmail">Gmail — abralogisticsupport@gmail.com</option></select><div class="form-text">Choose where this campaign is sent from. CRM Email uses the configured SMTP mailbox. Gmail uses the authorized Gmail account and sends the same HTML email.</div><div class="mt-2 d-flex align-items-center gap-2"><button type="button" class="btn btn-sm btn-outline-secondary" id="marketingGmailAuthorizeBtn" onclick="window.MarketingChannels.authorizeGmail()">Authorize Gmail</button><span id="marketingGmailStatus" class="small text-muted"></span></div></div>
+            <div class="mb-2">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <label class="form-label mb-0">Body <span class="text-danger">*</span></label>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Email editor mode">
+                  <button type="button" class="btn btn-outline-secondary" id="marketingEmailEditorVisualBtn" onclick="window.MarketingChannels.setEmailEditorMode('visual')"><i class="bi bi-pencil-square me-1"></i>Visual</button>
+                  <button type="button" class="btn btn-outline-secondary" id="marketingEmailEditorHtmlBtn" onclick="window.MarketingChannels.setEmailEditorMode('html')"><i class="bi bi-code-slash me-1"></i>HTML</button>
+                  <button type="button" class="btn btn-outline-secondary" onclick="window.MarketingChannels.previewEmail()"><i class="bi bi-eye me-1"></i>Preview</button>
+                </div>
+              </div>
+              <div id="marketingEmailEditor" class="marketing-email-editor">
+                <div id="marketingEmailToolbar" class="marketing-email-toolbar" role="toolbar" aria-label="Email formatting tools">
+                  <button type="button" class="btn btn-sm btn-light" title="Bold" onclick="window.MarketingChannels.execEmailCommand('bold')"><i class="bi bi-type-bold"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Italic" onclick="window.MarketingChannels.execEmailCommand('italic')"><i class="bi bi-type-italic"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Underline" onclick="window.MarketingChannels.execEmailCommand('underline')"><i class="bi bi-type-underline"></i></button>
+                  <select class="form-select form-select-sm" title="Heading" onchange="window.MarketingChannels.execEmailCommand('formatBlock', this.value); this.value='p'">
+                    <option value="p">Normal</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="h4">Heading 4</option>
+                  </select>
+                  <select class="form-select form-select-sm" title="Font size" onchange="window.MarketingChannels.execEmailCommand('fontSize', this.value); this.value='3'">
+                    <option value="3">Size</option><option value="2">Small</option><option value="3">Normal</option><option value="4">Large</option><option value="5">XL</option>
+                  </select>
+                  <button type="button" class="btn btn-sm btn-light" title="Bulleted list" onclick="window.MarketingChannels.execEmailCommand('insertUnorderedList')"><i class="bi bi-list-ul"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Numbered list" onclick="window.MarketingChannels.execEmailCommand('insertOrderedList')"><i class="bi bi-list-ol"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Align left" onclick="window.MarketingChannels.execEmailCommand('justifyLeft')"><i class="bi bi-text-left"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Align center" onclick="window.MarketingChannels.execEmailCommand('justifyCenter')"><i class="bi bi-text-center"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Align right" onclick="window.MarketingChannels.execEmailCommand('justifyRight')"><i class="bi bi-text-right"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Add link" onclick="window.MarketingChannels.insertEmailLink()"><i class="bi bi-link-45deg"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Add image" onclick="window.MarketingChannels.insertEmailImage()"><i class="bi bi-image"></i></button>
+                  <button type="button" class="btn btn-sm btn-light" title="Clear formatting" onclick="window.MarketingChannels.execEmailCommand('removeFormat')"><i class="bi bi-eraser"></i></button>
+                </div>
+                <div id="marketingCampaignBodyEditor" class="marketing-email-editable" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Hi {{Name}}, ..."></div>
+                <textarea id="marketingCampaignBodyHtml" class="marketing-email-source d-none" rows="12" spellcheck="false" placeholder="Paste or edit email-safe HTML here..."></textarea>
+              </div>
+              <textarea id="marketingCampaignBody" class="d-none" aria-hidden="true"></textarea>
+            </div>
+            <div id="marketingCampaignPlaceholderHelp" class="form-text">Use {{Name}} to personalize each message. You can format the email visually or edit the HTML directly.</div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>

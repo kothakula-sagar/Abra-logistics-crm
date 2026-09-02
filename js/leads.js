@@ -564,39 +564,46 @@ function buildFirestoreQuery() {
  */
 async function updateTotalCount() {
   try {
-    // Use the authenticated server aggregation endpoint. It returns only the
-    // count, so the browser never downloads the entire leads collection just
-    // to display pagination totals.
-    if (window.auth?.currentUser) {
-      const idToken = await window.auth.currentUser.getIdToken();
-      const params = new URLSearchParams();
-      const filters = PAGINATION_STATE.currentFilters;
-
-      if (filters.status) params.set("status", filters.status);
-      if (filters.assignedTo && CURRENT_USER.role !== "member") params.set("assignedTo", filters.assignedTo);
-      if (filters.campaign) params.set("campaign", filters.campaign);
-      if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
-      if (filters.dateTo) params.set("dateTo", filters.dateTo);
-
-      const response = await fetch(`/api/leads/count?${params.toString()}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${idToken}` },
-        cache: "no-store"
-      });
-
-      if (!response.ok) throw new Error(`Lead count request failed (${response.status})`);
-      const result = await response.json();
-      if (!result.ok) throw new Error(result.error || "Lead count request failed");
-
-      PAGINATION_STATE.totalLeads = Number(result.count) || 0;
-      return;
+    let countQuery = leadsRef;
+    
+    // Apply same filters as main query
+    if (CURRENT_USER.role === "member" || CURRENT_USER.role === "hr") {
+      countQuery = countQuery.where("assignedTo", "==", CURRENT_USER.uid);
     }
-
-    throw new Error("Firebase authentication is not ready for lead count.");
+    
+    if (PAGINATION_STATE.currentFilters.status) {
+      countQuery = countQuery.where("status", "==", PAGINATION_STATE.currentFilters.status);
+    }
+    
+    if (PAGINATION_STATE.currentFilters.assignedTo && CURRENT_USER.role !== "member") {
+      countQuery = countQuery.where("assignedTo", "==", PAGINATION_STATE.currentFilters.assignedTo);
+    }
+    
+    if (PAGINATION_STATE.currentFilters.campaign) {
+      countQuery = countQuery.where("campaignName", "==", PAGINATION_STATE.currentFilters.campaign);
+    }
+    
+    if (PAGINATION_STATE.currentFilters.dateFrom) {
+      const fromDate = firebase.firestore.Timestamp.fromDate(
+        new Date(PAGINATION_STATE.currentFilters.dateFrom + "T00:00:00")
+      );
+      countQuery = countQuery.where("createdAt", ">=", fromDate);
+    }
+    
+    if (PAGINATION_STATE.currentFilters.dateTo) {
+      const toDate = firebase.firestore.Timestamp.fromDate(
+        new Date(PAGINATION_STATE.currentFilters.dateTo + "T23:59:59")
+      );
+      countQuery = countQuery.where("createdAt", "<=", toDate);
+    }
+    
+    // Get count
+    const snapshot = await countQuery.get();
+    PAGINATION_STATE.totalLeads = snapshot.size;
+    
   } catch (error) {
-    console.error("Error getting total lead count:", error);
-    // Do not fall back to a full collection read. Keep the current total so a
-    // temporary count endpoint issue cannot turn into a massive Firestore read.
+    console.error("Error getting total count:", error);
+    PAGINATION_STATE.totalLeads = 0;
   }
 }
 
@@ -654,9 +661,6 @@ async function refreshActiveMembers() {
   snap.forEach((doc) => ACTIVE_MEMBERS.push({ id: doc.id, ...doc.data() }));
   ACTIVE_MEMBERS.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
   window.ACTIVE_MEMBERS = ACTIVE_MEMBERS; // Keep window reference updated
-  if (typeof assignmentMembersCache !== "undefined") {
-    assignmentMembersCache.member = { timestamp: Date.now() };
-  }
 }
 
 async function refreshActiveHR() {
@@ -665,9 +669,6 @@ async function refreshActiveHR() {
   snap.forEach((doc) => ACTIVE_HR.push({ id: doc.id, ...doc.data() }));
   ACTIVE_HR.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
   window.ACTIVE_HR = ACTIVE_HR; // Keep window reference updated
-  if (typeof assignmentMembersCache !== "undefined") {
-    assignmentMembersCache.hr = { timestamp: Date.now() };
-  }
 }
 
 async function createHRTransferRequest(leadId, leadData, noteText) {
@@ -1218,11 +1219,6 @@ async function executeStatusUpdateWithFollowUp(leadId, newStatus, noteText, foll
   }
   const leadData = leadDoc.data();
 
-  if (isInterestedLeadLocked(leadData)) {
-    toast("Interested leads are locked and cannot have their status changed.", "warning");
-    return;
-  }
-
   // Read settings
   const maxConsecutiveAttempts = getCRMSetting("maxConsecutiveNotPickingAttempts") || 3;
   
@@ -1271,14 +1267,6 @@ async function updateLeadStatus(leadId, newStatus, noteText) {
     return;
   }
   const leadData = leadDoc.data();
-
-  // Hard client-side guard for existing and newly created Interested leads.
-  // The UI also hides/disables the status controls, but this protects direct
-  // calls to updateLeadStatus from accidentally changing a locked lead.
-  if (isInterestedLeadLocked(leadData)) {
-    toast("Interested leads are locked and cannot have their status changed.", "warning");
-    return;
-  }
   
   // ✅ INTERCEPT "Call Back Later" — require follow-up scheduling
   if (newStatus === "Call Back Later") {
@@ -1811,12 +1799,12 @@ function renderLeadsTable() {
                   title="View Details" data-bs-toggle="tooltip">
             <i class="bi bi-eye"></i>
           </button>
-          ${isPending ? `<button class="btn btn-icon btn-sm btn-brand" onclick="openManualLeadAssignmentModal('${l.id}')" title="Manual Assignment" data-bs-toggle="tooltip"><i class="bi bi-person-check-fill"></i></button>` : (canChangeLeadStatus(l) ? `
+          ${isPending ? `<button class="btn btn-icon btn-sm btn-brand" onclick="openManualLeadAssignmentModal('${l.id}')" title="Manual Assignment" data-bs-toggle="tooltip"><i class="bi bi-person-check-fill"></i></button>` : `
           <button class="btn btn-icon btn-sm btn-primary" onclick="openStatusModal('${l.id}')" 
                   title="Update Status" data-bs-toggle="tooltip">
             <i class="bi bi-pencil-square"></i>
           </button>
-          ` : '')}
+          `}
           ${phone ? `
           <a href="tel:${phone}" class="btn btn-icon btn-sm btn-success" 
              title="Call" data-bs-toggle="tooltip">
@@ -2542,9 +2530,9 @@ function _renderUrgentStaff(container) {
           <a href="tel:${phone}" class="btn btn-sm btn-success">
             <i class="bi bi-telephone-fill"></i> Call
           </a>` : ""}
-          ${canChangeLeadStatus(l) ? `<button class="btn btn-sm btn-primary" onclick="openStatusModal('${l.id}')">
+          <button class="btn btn-sm btn-primary" onclick="openStatusModal('${l.id}')">
             <i class="bi bi-pencil-square"></i> Update
-          </button>` : ''}
+          </button>
           <button class="btn btn-sm btn-ai-pitch" onclick="openSalesPitchModal('${l.id}')">
             <i class="bi bi-robot"></i> AI Pitch
           </button>
@@ -2629,9 +2617,9 @@ function _renderUrgentMember(container) {
           <a href="tel:${phone}" class="btn btn-sm btn-success">
             <i class="bi bi-telephone-fill"></i> Call
           </a>` : ""}
-          ${canChangeLeadStatus(l) ? `<button class="btn btn-sm btn-primary" onclick="openStatusModal('${l.id}')">
+          <button class="btn btn-sm btn-primary" onclick="openStatusModal('${l.id}')">
             <i class="bi bi-pencil-square"></i> Update
-          </button>` : ''}
+          </button>
           <button class="btn btn-sm btn-ai-pitch" onclick="openSalesPitchModal('${l.id}')">
             <i class="bi bi-robot"></i> AI Pitch
           </button>
@@ -2671,7 +2659,7 @@ function renderMyFollowUps() {
       </div>
       <div class="text-end">
         <div class="fw-semibold ${due ? "text-danger" : ""}">${due ? "Call now" : "Call at " + formatDateTime(dt)}</div>
-        ${canChangeLeadStatus(l) ? `<button class="btn btn-sm btn-primary mt-1" onclick="openStatusModal('${l.id}')">Update</button>` : ''}
+        <button class="btn btn-sm btn-primary mt-1" onclick="openStatusModal('${l.id}')">Update</button>
       </div>
     </div>`;
   }).join("");
@@ -2797,16 +2785,6 @@ if (addLeadForm) {
 // ---------------- MODALS: Update Status ----------------
 let currentStatusLeadId = null;
 
-// Interested is a final/locked lead status. This applies to old records too,
-// because the rule is based on the lead's current status at render time.
-function isInterestedLeadLocked(lead) {
-  return String(lead?.status || "").trim().toLowerCase() === "interested";
-}
-
-function canChangeLeadStatus(lead) {
-  return !!lead && !isInterestedLeadLocked(lead);
-}
-
 function openStatusModal(leadId) {
   const lead = ALL_LEADS.find((l) => l.id === leadId);
   if (!lead) return;
@@ -2814,24 +2792,11 @@ function openStatusModal(leadId) {
 
   document.getElementById("statusModalLeadName").textContent = `${lead.fullName} — ${lead.phoneNumber}`;
   const select = document.getElementById("statusSelect");
-  const note = document.getElementById("statusNote");
-  const submitBtn = document.querySelector('#statusUpdateForm button[type="submit"]');
-  const locked = isInterestedLeadLocked(lead);
-
-  // Build dropdown with all regular statuses. For Interested leads, show only
-  // the current status and disable the controls so there is no change option.
-  select.innerHTML = locked
-    ? `<option value="Interested" selected>Interested</option>`
-    : STATUS_LIST.map((s) => `<option value="${s}" ${s === lead.status ? "selected" : ""}>${s}</option>`).join("");
-  select.disabled = locked;
-  note.value = "";
-  note.disabled = locked;
-  if (submitBtn) {
-    submitBtn.disabled = locked;
-    submitBtn.innerHTML = locked
-      ? '<i class="bi bi-lock-fill me-1"></i>Status Locked'
-      : '<i class="bi bi-check-lg me-1"></i>Save Update';
-  }
+  
+  // Build dropdown with all regular statuses (SYSTEM_STATUSES are never selectable)
+  // "Not Interested" IS visible for everyone - it's intercepted for members
+  select.innerHTML = STATUS_LIST.map((s) => `<option value="${s}" ${s === lead.status ? "selected" : ""}>${s}</option>`).join("");
+  document.getElementById("statusNote").value = "";
 
   new bootstrap.Modal(document.getElementById("statusModal")).show();
 }
@@ -2843,12 +2808,6 @@ if (statusUpdateForm) {
     const newStatus = document.getElementById("statusSelect").value;
     const note = document.getElementById("statusNote").value;
     const lead = ALL_LEADS.find(l => l.id === currentStatusLeadId);
-
-    if (!lead) return;
-    if (isInterestedLeadLocked(lead)) {
-      toast("Interested leads are locked and cannot have their status changed.", "warning");
-      return;
-    }
     
     // Check if this is a "Not Interested" status for non-admin users
     if (newStatus === "Not Interested" && CURRENT_USER.role !== "admin" && CURRENT_USER.role !== "superadmin") {
