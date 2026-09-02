@@ -793,6 +793,67 @@ document.addEventListener("DOMContentLoaded", () => {
 // ============================================================
 // LEAD DETAILS MODAL (👁 View) — label:value layout
 // ============================================================
+// ============================================================
+// LEAD DETAILS MODAL (👁 View) — label:value layout + copy tools
+// ============================================================
+function copyLeadDetailText(text, button) {
+  const value = String(text ?? "");
+  if (!value || value === "—") return;
+
+  const setCopiedState = () => {
+    if (!button) return;
+    const original = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-check2"></i> Copied';
+    button.classList.add("is-copied");
+    setTimeout(() => {
+      button.innerHTML = original;
+      button.classList.remove("is-copied");
+    }, 1400);
+  };
+
+  const fallbackCopy = () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+      document.execCommand("copy");
+      setCopiedState();
+    } catch (error) {
+      console.error("Copy failed:", error);
+    } finally {
+      textarea.remove();
+    }
+  };
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(value).then(setCopiedState).catch(fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+}
+
+function copyCampaignDetails(leadId, button) {
+  const lead = ALL_LEADS.find((l) => l.id === leadId);
+  if (!lead) return;
+
+  const meta = lead.campaignFieldsMeta || [];
+  if (meta.length === 0) return;
+
+  const lines = ["**Campaign Details**"];
+  meta.forEach((m) => {
+    let val = lead.campaignData ? lead.campaignData[m.id] : undefined;
+    if (Array.isArray(val)) val = val.join(", ");
+    val = val || "—";
+    lines.push(`**${m.label}** ${val}`);
+  });
+
+  copyLeadDetailText(lines.join("\n"), button);
+}
+
 function openLeadDetailsModal(leadId) {
   const lead = ALL_LEADS.find((l) => l.id === leadId);
   if (!lead) return;
@@ -800,9 +861,9 @@ function openLeadDetailsModal(leadId) {
   const rows = [];
   rows.push(["Campaign Type", lead.campaignName || "General / No Campaign"]);
   rows.push("divider");
-  rows.push(["Full Name", lead.fullName || "—"]);
-  rows.push(["Mobile Number", lead.phoneNumber || "—"]);
-  rows.push(["Email", lead.email || "—"]);
+  rows.push(["Full Name", lead.fullName || "—", true]);
+  rows.push(["Mobile Number", lead.phoneNumber || "—", true]);
+  rows.push(["Email", lead.email || "—", true]);
 
   const meta = lead.campaignFieldsMeta || [];
   if (meta.length > 0) {
@@ -817,7 +878,7 @@ function openLeadDetailsModal(leadId) {
     // Legacy lead — show the original fields it was created with
     rows.push("divider");
     if (lead.serviceNeeded) rows.push(["Service Needed", lead.serviceNeeded]);
-    if (lead.companyName)  rows.push(["Company Name", lead.companyName]);
+    if (lead.companyName) rows.push(["Company Name", lead.companyName]);
   }
 
   rows.push("divider");
@@ -836,12 +897,27 @@ function openLeadDetailsModal(leadId) {
   document.getElementById("leadDetailsModalTitle").textContent = `Sl.No ${lead.slNo} — ${lead.fullName}`;
   document.getElementById("leadDetailsModalBody").innerHTML = rows.map((r) => {
     if (r === "divider") return `<hr class="my-2">`;
-    if (r === "__campaign_header__") return `<div class="small fw-semibold text-muted mb-1">Campaign Details</div>`;
-    const [label, value] = r;
+    if (r === "__campaign_header__") {
+      return `
+        <div class="lead-detail-section-header">
+          <div class="small fw-semibold text-muted">Campaign Details</div>
+          <button type="button" class="btn btn-sm btn-outline-secondary lead-copy-all-btn"
+                  onclick="copyCampaignDetails('${lead.id}', this)" title="Copy all campaign details">
+            <i class="bi bi-copy"></i> Copy All
+          </button>
+        </div>`;
+    }
+    const [label, value, canCopy] = r;
+    const safeValue = String(value);
     return `
     <div class="lead-detail-row">
       <div class="lead-detail-label">${escapeHtml(label)}</div>
-      <div class="lead-detail-value">${escapeHtml(String(value))}</div>
+      <div class="lead-detail-value">${escapeHtml(safeValue)}</div>
+      ${canCopy ? `<button type="button" class="btn btn-sm btn-outline-secondary lead-copy-btn"
+          onclick="copyLeadDetailText(this.dataset.copyValue, this)"
+          data-copy-value="${escapeHtml(safeValue)}" title="Copy ${escapeHtml(label)}" aria-label="Copy ${escapeHtml(label)}">
+          <i class="bi bi-copy"></i>
+        </button>` : ""}
     </div>`;
   }).join("");
 
