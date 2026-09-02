@@ -5,6 +5,7 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 const app = express();
 
@@ -29,13 +30,6 @@ const WEBHOOK_SECRET =
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || '*';
 
-const SMTP_HOST = String(process.env.SMTP_HOST || 'mail.abra-logistic.com').trim();
-const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
-const SMTP_SECURE = String(process.env.SMTP_SECURE || (SMTP_PORT === 465 ? 'true' : 'false')).toLowerCase() === 'true';
-const SMTP_USER = String(process.env.SMTP_USER || 'support@abra-logistic.com').trim();
-const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
-const SMTP_FROM = String(process.env.SMTP_FROM || SMTP_USER).trim();
-const SMTP_FROM_NAME = String(process.env.SMTP_FROM_NAME || 'Abra E Logistic PVT. LTD.').trim();
 
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
 const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
@@ -45,78 +39,9 @@ const GMAIL_REDIRECT_URI = String(process.env.GMAIL_REDIRECT_URI || `${PUBLIC_BA
 const gmailOAuthStates = new Map();
 const gmailAccessTokenCache = { token: '', expiresAt: 0 };
 
-function smtpReadResponse(socket) {
-  return new Promise((resolve, reject) => {
-    let buffer = '';
-    const onData = chunk => {
-      buffer += chunk.toString('utf8');
-      const lines = buffer.split(/\r?\n/);
-      const last = lines.filter(Boolean).at(-1) || '';
-      if (/^\d{3} /.test(last)) {
-        cleanup();
-        const code = Number(last.slice(0, 3));
-        if (code >= 400) reject(new Error(`SMTP ${code}: ${last.slice(4)}`));
-        else resolve({ code, text: buffer });
-      }
-    };
-    const onError = err => { cleanup(); reject(err); };
-    const onClose = () => { cleanup(); reject(new Error('SMTP connection closed unexpectedly.')); };
-    const cleanup = () => {
-      socket.off('data', onData);
-      socket.off('error', onError);
-      socket.off('close', onClose);
-    };
-    socket.on('data', onData);
-    socket.on('error', onError);
-    socket.on('close', onClose);
-  });
-}
-
-async function smtpCommand(socket, command, expected = null) {
-  socket.write(`${command}\r\n`);
-  const response = await smtpReadResponse(socket);
-  if (expected && !expected.includes(response.code)) {
-    throw new Error(`Unexpected SMTP response ${response.code}.`);
-  }
-  return response;
-}
-
 function smtpHeader(value) {
   return `=?UTF-8?B?${Buffer.from(String(value || ''), 'utf8').toString('base64')}?=`;
 }
-
-function buildMimeMessage({ to, subject, text, html, messageId }) {
-  const boundary = `=_AbraCRM_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const safeText = String(text || '').replace(/\r?\n/g, '\r\n');
-  const safeHtml = String(html || '').replace(/\r?\n/g, '\r\n');
-  const body = [
-    `From: ${smtpHeader(SMTP_FROM_NAME)} <${SMTP_FROM}>`,
-    `To: ${to}`,
-    `Reply-To: ${SMTP_FROM}`,
-    `Subject: ${smtpHeader(subject)}`,
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${messageId}>`,
-    'MIME-Version: 1.0',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    '',
-    `--${boundary}`,
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    safeText,
-    '',
-    `--${boundary}`,
-    'Content-Type: text/html; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    safeHtml,
-    '',
-    `--${boundary}--`,
-    ''
-  ].join('\r\n');
-  return body.replace(/^\./gm, '..');
-}
-
 
 function base64UrlEncode(value) {
   return Buffer.from(String(value || ''), 'utf8')
@@ -126,14 +51,19 @@ function base64UrlEncode(value) {
     .replace(/=+$/g, '');
 }
 
+function encodeMimeBase64(value) {
+  return Buffer.from(String(value || ''), 'utf8')
+    .toString('base64')
+    .match(/.{1,76}/g)?.join('\r\n') || '';
+}
+
 function buildGmailMimeMessage({ to, subject, text, html, messageId }) {
   const boundary = `=_AbraGmail_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const safeText = String(text || '').replace(/\r?\n/g, '\r\n');
-  const safeHtml = String(html || '').replace(/\r?\n/g, '\r\n');
+  const safeFrom = GMAIL_USER_EMAIL;
   return [
-    `From: ${smtpHeader(GMAIL_USER_EMAIL)} <${GMAIL_USER_EMAIL}>`,
+    `From: ${smtpHeader('Abra E Logistic PVT. LTD.')} <${safeFrom}>`,
     `To: ${to}`,
-    `Reply-To: ${GMAIL_USER_EMAIL}`,
+    `Reply-To: ${safeFrom}`,
     `Subject: ${smtpHeader(subject)}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${messageId}>`,
@@ -142,15 +72,15 @@ function buildGmailMimeMessage({ to, subject, text, html, messageId }) {
     '',
     `--${boundary}`,
     'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
+    'Content-Transfer-Encoding: base64',
     '',
-    safeText,
+    encodeMimeBase64(text),
     '',
     `--${boundary}`,
     'Content-Type: text/html; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
+    'Content-Transfer-Encoding: base64',
     '',
-    safeHtml,
+    encodeMimeBase64(html),
     '',
     `--${boundary}--`,
     ''
@@ -197,7 +127,21 @@ async function getGmailAccessToken() {
 
 async function sendGmailEmail({ to, subject, text, html }) {
   const accessToken = await getGmailAccessToken();
-  const messageId = `${Date.now()}.${Math.random().toString(16).slice(2)}@gmail.com`;
+  let senderEmail = GMAIL_USER_EMAIL;
+  try {
+    const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const profile = await profileResponse.json().catch(() => ({}));
+    if (profileResponse.ok && profile.emailAddress) senderEmail = String(profile.emailAddress).trim();
+  } catch (profileError) {
+    console.warn('Gmail profile lookup failed, using GMAIL_USER_EMAIL:', profileError.message);
+  }
+  if (senderEmail.toLowerCase() !== GMAIL_USER_EMAIL.toLowerCase()) {
+    console.warn(`Authenticated Gmail profile ${senderEmail} differs from GMAIL_USER_EMAIL ${GMAIL_USER_EMAIL}. Using authenticated profile.`);
+  }
+
+  const messageId = `${Date.now()}.${Math.random().toString(16).slice(2)}@abra-logistic.com`;
   const raw = base64UrlEncode(buildGmailMimeMessage({
     to,
     subject,
@@ -215,12 +159,12 @@ async function sendGmailEmail({ to, subject, text, html }) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.id) {
-    const reason = data?.error?.message || 'Gmail API rejected the message.';
-    const err = new Error(reason);
+    const reason = data?.error?.message || data?.error?.status || 'Gmail API rejected the message.';
+    const err = new Error(`Gmail API: ${reason}`);
     err.code = 'GMAIL_SEND_FAILED';
     throw err;
   }
-  return { messageId: data.id || messageId };
+  return { messageId: data.id || messageId, senderEmail };
 }
 
 function cleanupGmailOAuthStates() {
@@ -228,77 +172,6 @@ function cleanupGmailOAuthStates() {
   for (const [state, item] of gmailOAuthStates.entries()) {
     if (!item || now - item.createdAt > 10 * 60 * 1000) gmailOAuthStates.delete(state);
   }
-}
-
-function openSmtpSocket() {
-  const net = require('net');
-  const tls = require('tls');
-  if (SMTP_SECURE) {
-    return new Promise((resolve, reject) => {
-      const socket = tls.connect({ host: SMTP_HOST, port: SMTP_PORT, servername: SMTP_HOST, minVersion: 'TLSv1.2' }, () => resolve(socket));
-      socket.setTimeout(30000, () => socket.destroy(new Error('SMTP connection timed out.')));
-      socket.once('error', reject);
-    });
-  }
-  return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: SMTP_HOST, port: SMTP_PORT });
-    socket.once('connect', () => resolve(socket));
-    socket.setTimeout(30000, () => socket.destroy(new Error('SMTP connection timed out.')));
-    socket.once('error', reject);
-  });
-}
-
-async function sendSmtpEmail({ to, subject, text, html }) {
-  if (!SMTP_PASS) throw new Error('SMTP email sending is not configured. Add SMTP_PASS in the server environment.');
-  let socket = await openSmtpSocket();
-  const messageId = `${Date.now()}.${Math.random().toString(16).slice(2)}@${SMTP_HOST}`;
-  try {
-    await smtpReadResponse(socket);
-    let ehlo = await smtpCommand(socket, `EHLO abra-logistic.com`, [250]);
-    if (!SMTP_SECURE && /STARTTLS/i.test(ehlo.text)) {
-      await smtpCommand(socket, 'STARTTLS', [220]);
-      const tls = require('tls');
-      const secureSocket = await new Promise((resolve, reject) => {
-        const wrapped = tls.connect({ socket, servername: SMTP_HOST, minVersion: 'TLSv1.2' }, () => resolve(wrapped));
-        wrapped.once('error', reject);
-      });
-      socket = secureSocket;
-      await smtpCommand(socket, 'EHLO abra-logistic.com', [250]);
-    }
-    let authResult;
-    try {
-      const plain = Buffer.from(`\0${SMTP_USER}\0${SMTP_PASS}`, 'utf8').toString('base64');
-      authResult = await smtpCommand(socket, `AUTH PLAIN ${plain}`, [235]);
-    } catch (_) {
-      await smtpCommand(socket, 'AUTH LOGIN', [334]);
-      await smtpCommand(socket, Buffer.from(SMTP_USER, 'utf8').toString('base64'), [334]);
-      await smtpCommand(socket, Buffer.from(SMTP_PASS, 'utf8').toString('base64'), [235]);
-    }
-    await smtpCommand(socket, `MAIL FROM:<${SMTP_FROM}>`, [250]);
-    await smtpCommand(socket, `RCPT TO:<${to}>`, [250, 251]);
-    await smtpCommand(socket, 'DATA', [354]);
-    socket.write(`${buildMimeMessage({ to, subject, text, html, messageId })}\r\n.\r\n`);
-    await smtpReadResponse(socket);
-    await smtpCommand(socket, 'QUIT', [221]);
-    return { messageId };
-  } finally {
-    socket.destroy();
-  }
-}
-
-function sanitizeServerEmailHtml(html = '') {
-  let value = String(html || '').trim();
-  value = value.replace(/<\/?(?:script|iframe|object|embed|form|input|button|textarea|select|style)[^>]*>/gi, '');
-  value = value.replace(/<[^>]+\s(?:on[a-z]+|srcdoc)\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)/gi, '');
-  value = value.replace(/\s(?:on[a-z]+|srcdoc)\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)/gi, '');
-  value = value.replace(/(href|src)\s*=\s*(\"|')\s*javascript:[^\"']*(\"|')/gi, '$1=$2#$3');
-  value = value.replace(/(href|src)\s*=\s*javascript:[^\s>]+/gi, '$1="#"');
-  return value;
-}
-
-function buildEmailHtmlDocument(html = '') {
-  const clean = sanitizeServerEmailHtml(html);
-  return `<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"></head><body style=\"margin:0;padding:0;background:#ffffff;\"><div style=\"margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#333333;\">${clean}</div></body></html>`;
 }
 
 const REMINDER_SCAN_MS =
@@ -3643,7 +3516,7 @@ app.post(
       const subject = String(req.body?.subject || '').trim();
       const html = String(req.body?.html || '').trim();
       const text = String(req.body?.text || '').trim();
-      const provider = String(req.body?.provider || 'CRM').trim().toUpperCase();
+      const provider = String(req.body?.provider || 'GMAIL').trim().toUpperCase();
 
       if (!to || !subject || !html) {
         return res.status(400).json({ ok: false, error: 'Recipient, subject, and HTML body are required.' });
@@ -3656,23 +3529,30 @@ app.post(
         return res.status(413).json({ ok: false, error: 'Email HTML is too large.' });
       }
 
-      const renderedHtml = buildEmailHtmlDocument(html);
-      let info;
-      if (provider === 'GMAIL') {
-        info = await sendGmailEmail({ to, subject, text, html: renderedHtml });
-        return res.json({ ok: true, messageId: info.messageId || '', sentThrough: 'Gmail' });
+      if (provider && provider !== 'GMAIL') {
+        return res.status(400).json({ ok: false, error: 'This CRM sends Email Marketing campaigns through Gmail only.' });
       }
-      if (provider !== 'CRM') {
-        return res.status(400).json({ ok: false, error: `Unsupported email provider: ${provider}.` });
+      const info = await sendGmailEmail({ to, subject, text, html });
+      const sentAt = new Date();
+      const campaignId = String(req.body?.campaignId || '').trim();
+      const contactId = String(req.body?.contactId || '').trim();
+      if (campaignId && contactId) {
+        try {
+          await db.collection('emailMarketingCampaigns').doc(campaignId).update({
+            [`sentRecipients.${contactId}`]: {
+              sentAt: admin.firestore.Timestamp.fromDate(sentAt),
+              sentThrough: 'Gmail',
+              sentBy: String(req.firebaseUser?.uid || ''),
+              sentByName: String(req.body?.sentByName || req.firebaseUser?.email || 'CRM User'),
+              messageId: info.messageId || ''
+            }
+          });
+        } catch (recordError) {
+          console.error('Gmail sent but campaign status could not be recorded:', recordError);
+          return res.status(500).json({ ok: false, code: 'SEND_RECORDED_FAILED', error: 'The email was sent by Gmail, but the CRM could not save the Sent status. Please do not resend until the campaign is refreshed.' });
+        }
       }
-
-      info = await sendSmtpEmail({
-        to,
-        subject,
-        text,
-        html: renderedHtml
-      });
-      return res.json({ ok: true, messageId: info.messageId || '', sentThrough: 'CRM Email' });
+      return res.json({ ok: true, messageId: info.messageId || '', sentThrough: 'Gmail', sentAt: sentAt.toISOString() });
     } catch (error) {
       console.error('HTML email send error:', error);
       const status = error?.code === 'GMAIL_AUTH_REQUIRED' ? 409 : 500;

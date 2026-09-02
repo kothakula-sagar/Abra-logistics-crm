@@ -66,7 +66,8 @@ function selectedLeadRows() {
 }
 
 function campaignEvents(campaign) {
-  return Object.values(campaign.sentRecipients||{}).filter(e=>e?.openedAt).map(e=>({...e,campaign}));
+  const isEmail = String(campaign?.channel || '').toLowerCase() === 'email' || Object.values(campaign.sentRecipients||{}).some(e=>String(e?.sentThrough||'').toLowerCase()==='gmail');
+  return Object.values(campaign.sentRecipients||{}).filter(e=>isEmail ? (e?.sentAt || e?.timestamp) : e?.openedAt).map(e=>({...e,campaign}));
 }
 
 function renderCampaignReportsPanel() {

@@ -2,20 +2,13 @@
 
 The CRM supports two direct HTML email delivery providers:
 
-- **CRM Email**: sends through the configured SMTP mailbox (`support@abra-logistic.com`).
+- **Email Marketing**: sends through the authorized Gmail account (`abralogisticsupport@gmail.com`).
 - **Gmail**: sends through the Gmail API as `abralogisticsupport@gmail.com` using OAuth 2.0.
 
 The selected provider is saved with each campaign. Clicking **Send Email** uses that campaign's selected provider. Both providers send a real multipart/alternative message with `text/plain` and `text/html` parts so Outlook, Gmail, and webmail can render the HTML formatting.
 
 ## SMTP environment variables
 
-- `SMTP_HOST` - SMTP hostname.
-- `SMTP_PORT` - SMTP port, normally 465 for implicit TLS or 587 for STARTTLS.
-- `SMTP_SECURE` - `true` for port 465; `false` for STARTTLS/587.
-- `SMTP_USER` - sending mailbox username.
-- `SMTP_PASS` - sending mailbox password.
-- `SMTP_FROM` - sender address.
-- `SMTP_FROM_NAME` - sender display name.
 
 ## Gmail OAuth 2.0 setup
 

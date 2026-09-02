@@ -75,13 +75,13 @@ function getLoadedLeads() {
   return Array.isArray(window.ALL_LEADS) ? window.ALL_LEADS : [];
 }
 
-function campaignMessageEvents(campaign) {
+function campaignMessageEvents(campaign, channel) {
   return Object.entries(campaign?.sentRecipients || {}).map(([contactId, entry]) => ({
     contactId,
-    openedAt: entry?.openedAt || entry?.sentAt || entry?.timestamp,
+    eventAt: channel === 'Email' ? (entry?.sentAt || entry?.timestamp) : (entry?.openedAt || entry?.sentAt || entry?.timestamp),
     sentBy: entry?.sentBy,
     sentByName: entry?.sentByName || 'CRM User'
-  })).filter(x => x.openedAt);
+  })).filter(x => x.eventAt);
 }
 
 function getReportDataset() {
@@ -104,10 +104,10 @@ function getReportDataset() {
   });
   const campaignsCreated = allCampaigns.filter(c => inReportRange(c.createdAt, range));
 
-  const emailEvents = emailCampaigns.flatMap(c => campaignMessageEvents(c).map(e => ({ ...e, campaign: c, channel: 'Email' })))
-    .filter(e => inReportRange(e.openedAt, range));
-  const whatsappEvents = whatsappCampaigns.flatMap(c => campaignMessageEvents(c).map(e => ({ ...e, campaign: c, channel: 'WhatsApp' })))
-    .filter(e => inReportRange(e.openedAt, range));
+  const emailEvents = emailCampaigns.flatMap(c => campaignMessageEvents(c, 'Email').map(e => ({ ...e, campaign: c, channel: 'Email' })))
+    .filter(e => inReportRange(e.eventAt, range));
+  const whatsappEvents = whatsappCampaigns.flatMap(c => campaignMessageEvents(c, 'WhatsApp').map(e => ({ ...e, campaign: c, channel: 'WhatsApp' })))
+    .filter(e => inReportRange(e.eventAt, range));
 
   const leadRows = getLoadedLeads().filter(l => inReportRange(l.createdAt, range));
   const leadStatusCounts = {};
@@ -202,8 +202,8 @@ function renderDailyReport() {
     statCard('New Customers', d.customersAdded.length, 'Added in selected period', '👥'),
     statCard('Customer Updates', d.customerUpdates.length, 'Subscription/profile changes', '✏️'),
     statCard('Campaigns Created', d.campaignsCreated.length, `${emailCampaignsCreated} Email · ${whatsappCampaignsCreated} WhatsApp`, '📣'),
-    statCard('Email Initiated', d.emailEvents.length, 'Opened from CRM', '✉️'),
-    statCard('WhatsApp Initiated', d.whatsappEvents.length, 'Opened from CRM', '💬'),
+    statCard('Email Initiated', d.emailEvents.length, 'Sent from CRM', '✉️'),
+    statCard('WhatsApp Initiated', d.whatsappEvents.length, 'Sent from CRM', '💬'),
     statCard('Total CRM Activity', totalMessages, 'Email + WhatsApp initiated', '📊'),
     statCard('Leads Received', leadTotal, 'From the loaded Leads dataset', '📋'),
     statCard('Subscribed Customers', d.customers.filter(c => c.emailStatus === 'Subscribed' || c.whatsappStatus === 'Subscribed').length, 'At least one active channel', '✅')
@@ -303,8 +303,8 @@ function renderReportCharts(d) {
   const labels = keys.map(k => reportDateLabel(k, false));
   const customerCounts = countByDate(d.customersAdded, x => x.createdAt, keys);
   const campaignCounts = countByDate(d.campaignsCreated, x => x.createdAt, keys);
-  const emailCounts = countByDate(d.emailEvents, x => x.openedAt, keys);
-  const waCounts = countByDate(d.whatsappEvents, x => x.openedAt, keys);
+  const emailCounts = countByDate(d.emailEvents, x => x.eventAt, keys);
+  const waCounts = countByDate(d.whatsappEvents, x => x.eventAt, keys);
 
   const make = (id, datasets) => {
     const el = document.getElementById(id); if (!el) return;
