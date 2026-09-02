@@ -1268,6 +1268,13 @@ async function updateLeadStatus(leadId, newStatus, noteText) {
   }
   const leadData = leadDoc.data();
   
+  // Hard guard: Interested leads are permanently locked from manual status changes.
+  // This protects existing Interested leads as well as newly created ones.
+  if (String(leadData.status || "") === "Interested" && String(newStatus || "") !== "Interested") {
+    toast("Interested status is locked and cannot be changed.", "warning");
+    return;
+  }
+  
   // ✅ INTERCEPT "Call Back Later" — require follow-up scheduling
   if (newStatus === "Call Back Later") {
     // Close the status modal first
@@ -1799,12 +1806,9 @@ function renderLeadsTable() {
                   title="View Details" data-bs-toggle="tooltip">
             <i class="bi bi-eye"></i>
           </button>
-          ${isPending ? `<button class="btn btn-icon btn-sm btn-brand" onclick="openManualLeadAssignmentModal('${l.id}')" title="Manual Assignment" data-bs-toggle="tooltip"><i class="bi bi-person-check-fill"></i></button>` : `
-          <button class="btn btn-icon btn-sm btn-primary" onclick="openStatusModal('${l.id}')" 
-                  title="Update Status" data-bs-toggle="tooltip">
-            <i class="bi bi-pencil-square"></i>
-          </button>
-          `}
+          ${isPending ? `<button class="btn btn-icon btn-sm btn-brand" onclick="openManualLeadAssignmentModal('${l.id}')" title="Manual Assignment" data-bs-toggle="tooltip"><i class="bi bi-person-check-fill"></i></button>` : (l.status === "Interested"
+            ? `<button class="btn btn-icon btn-sm btn-outline-secondary" disabled title="Interested status is locked" data-bs-toggle="tooltip"><i class="bi bi-lock-fill"></i></button>`
+            : `<button class="btn btn-icon btn-sm btn-primary" onclick="openStatusModal('${l.id}')" title="Update Status" data-bs-toggle="tooltip"><i class="bi bi-pencil-square"></i></button>`)}
           ${phone ? `
           <a href="tel:${phone}" class="btn btn-icon btn-sm btn-success" 
              title="Call" data-bs-toggle="tooltip">
@@ -2793,6 +2797,27 @@ function openStatusModal(leadId) {
   document.getElementById("statusModalLeadName").textContent = `${lead.fullName} — ${lead.phoneNumber}`;
   const select = document.getElementById("statusSelect");
   
+  // Interested is a terminal/locked status. This applies to old and new leads.
+  if (lead.status === "Interested") {
+    select.innerHTML = `<option value="Interested" selected>Interested</option>`;
+    select.disabled = true;
+    document.getElementById("statusNote").value = "";
+    document.getElementById("statusNote").disabled = true;
+    const submitBtn = document.querySelector("#statusUpdateForm button[type=submit]");
+    if (submitBtn) submitBtn.disabled = true;
+    const hint = document.getElementById("statusLockedNotice");
+    if (hint) { hint.textContent = "Interested status is locked and cannot be changed."; hint.classList.remove("d-none"); }
+    new bootstrap.Modal(document.getElementById("statusModal")).show();
+    return;
+  }
+
+  select.disabled = false;
+  document.getElementById("statusNote").disabled = false;
+  const submitBtn = document.querySelector("#statusUpdateForm button[type=submit]");
+  if (submitBtn) submitBtn.disabled = false;
+  const hint = document.getElementById("statusLockedNotice");
+  if (hint) hint.classList.add("d-none");
+
   // Build dropdown with all regular statuses (SYSTEM_STATUSES are never selectable)
   // "Not Interested" IS visible for everyone - it's intercepted for members
   select.innerHTML = STATUS_LIST.map((s) => `<option value="${s}" ${s === lead.status ? "selected" : ""}>${s}</option>`).join("");
@@ -2808,6 +2833,10 @@ if (statusUpdateForm) {
     const newStatus = document.getElementById("statusSelect").value;
     const note = document.getElementById("statusNote").value;
     const lead = ALL_LEADS.find(l => l.id === currentStatusLeadId);
+    if (lead?.status === "Interested") {
+      toast("Interested status is locked and cannot be changed.", "warning");
+      return;
+    }
     
     // Check if this is a "Not Interested" status for non-admin users
     if (newStatus === "Not Interested" && CURRENT_USER.role !== "admin" && CURRENT_USER.role !== "superadmin") {

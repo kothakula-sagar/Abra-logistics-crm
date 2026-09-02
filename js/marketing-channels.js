@@ -321,7 +321,7 @@ function allSentEntriesByUser(ch){
  // The marketing limit is shared across every user who has access to this
  // channel. Each campaign is still tracked separately for its own Sent state,
  // but the cooldown is calculated from all recorded sends in the channel.
- return campaigns.flatMap(c=>Object.values(c.sentRecipients||{}).map(x=>({...x,campaignId:c.id,time:asDate(x.openedAt)?.getTime()||0}))).filter(x=>x.time>0).sort((a,b)=>a.time-b.time);
+ return campaigns.flatMap(c=>Object.values(c.sentRecipients||{}).map(x=>({...x,campaignId:c.id,time:asDate(x.sentAt||x.openedAt||x.timestamp)?.getTime()||0}))).filter(x=>x.time>0).sort((a,b)=>a.time-b.time);
 }
 function getMarketingCooldown(ch){
  if(!CURRENT_USER?.uid)return {remaining:0,available:0,limit:1,total:0};

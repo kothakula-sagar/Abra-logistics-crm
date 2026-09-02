@@ -793,6 +793,58 @@ document.addEventListener("DOMContentLoaded", () => {
 // ============================================================
 // LEAD DETAILS MODAL (👁 View) — label:value layout
 // ============================================================
+function copyLeadDetailValue(value, label='Field') {
+  const text = String(value ?? '').trim();
+  if (!text || text === '—') {
+    if (typeof toast === 'function') toast(`No ${label.toLowerCase()} available to copy.`, 'warning');
+    return;
+  }
+  const done = () => { if (typeof toast === 'function') toast(`${label} copied.`, 'success'); };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => copyLeadDetailFallback(text, done));
+  } else {
+    copyLeadDetailFallback(text, done);
+  }
+}
+
+function copyLeadDetailFallback(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  try { document.execCommand('copy'); done(); }
+  catch (e) { if (typeof toast === 'function') toast('Unable to copy to clipboard.', 'danger'); }
+  finally { ta.remove(); }
+}
+
+function campaignDetailCopyText(lead) {
+  const lines = [];
+  const meta = lead.campaignFieldsMeta || [];
+  if (meta.length) {
+    meta.forEach((m) => {
+      let val = lead.campaignData ? lead.campaignData[m.id] : undefined;
+      if (Array.isArray(val)) val = val.join(', ');
+      val = String(val ?? '').trim();
+      lines.push(`${m.label || 'Field'}\n${val || '—'}`);
+    });
+  } else {
+    if (lead.serviceNeeded) lines.push(`Service Needed\n${lead.serviceNeeded}`);
+    if (lead.companyName) lines.push(`Company Name\n${lead.companyName}`);
+  }
+  return lines.join('\n\n');
+}
+
+function copyLeadCampaignDetails(leadId) {
+  const lead = ALL_LEADS.find((l) => l.id === leadId);
+  if (!lead) return;
+  const text = campaignDetailCopyText(lead);
+  if (!text) {
+    if (typeof toast === 'function') toast('No Campaign Details available to copy.', 'warning');
+    return;
+  }
+  copyLeadDetailValue(text, 'Campaign Details');
+}
+
 function openLeadDetailsModal(leadId) {
   const lead = ALL_LEADS.find((l) => l.id === leadId);
   if (!lead) return;
@@ -800,9 +852,9 @@ function openLeadDetailsModal(leadId) {
   const rows = [];
   rows.push(["Campaign Type", lead.campaignName || "General / No Campaign"]);
   rows.push("divider");
-  rows.push(["Full Name", lead.fullName || "—"]);
-  rows.push(["Mobile Number", lead.phoneNumber || "—"]);
-  rows.push(["Email", lead.email || "—"]);
+  rows.push(["Full Name", lead.fullName || "—", 'Full Name']);
+  rows.push(["Mobile Number", lead.phoneNumber || "—", 'Mobile Number']);
+  rows.push(["Email", lead.email || "—", 'Email']);
 
   const meta = lead.campaignFieldsMeta || [];
   if (meta.length > 0) {
@@ -814,8 +866,8 @@ function openLeadDetailsModal(leadId) {
       rows.push([m.label, val || "—"]);
     });
   } else if (lead.serviceNeeded || lead.companyName) {
-    // Legacy lead — show the original fields it was created with
     rows.push("divider");
+    rows.push("__campaign_header__");
     if (lead.serviceNeeded) rows.push(["Service Needed", lead.serviceNeeded]);
     if (lead.companyName)  rows.push(["Company Name", lead.companyName]);
   }
@@ -825,23 +877,30 @@ function openLeadDetailsModal(leadId) {
   rows.push(["Assignment Type", lead.assignedBy || (lead.assignmentPending ? "Pending" : "—")]);
   rows.push(["Assigned At", lead.assignedAt ? formatDateTime(lead.assignedAt.toDate()) : "—"]);
   rows.push(["Status", lead.status || "—"]);
-  
-  // Show consecutive "Not Picking Call" attempt counter
+
   if (lead.consecutiveNotPickingAttempts > 0) {
     const maxAttempts = getCRMSetting("maxConsecutiveNotPickingAttempts") || 3;
-    const label = "Consecutive Not Picking Call";
-    rows.push([label, `${lead.consecutiveNotPickingAttempts}/${maxAttempts}`]);
+    rows.push(["Consecutive Not Picking Call", `${lead.consecutiveNotPickingAttempts}/${maxAttempts}`]);
   }
 
   document.getElementById("leadDetailsModalTitle").textContent = `Sl.No ${lead.slNo} — ${lead.fullName}`;
   document.getElementById("leadDetailsModalBody").innerHTML = rows.map((r) => {
     if (r === "divider") return `<hr class="my-2">`;
-    if (r === "__campaign_header__") return `<div class="small fw-semibold text-muted mb-1">Campaign Details</div>`;
-    const [label, value] = r;
+    if (r === "__campaign_header__") return `
+      <div class="d-flex justify-content-between align-items-center mb-2 mt-1">
+        <div class="small fw-semibold text-muted">Campaign Details</div>
+        <button type="button" class="btn btn-sm btn-outline-primary lead-copy-all-btn" onclick="copyLeadCampaignDetails('${lead.id}')" title="Copy all Campaign Details for this customer">
+          <i class="bi bi-copy me-1"></i>Copy All *
+        </button>
+      </div>
+      <div class="small text-muted mb-2">* Copies Campaign Details for this customer only.</div>`;
+    const [label, value, copyLabel] = r;
+    const canCopy = ['Full Name', 'Mobile Number', 'Email'].includes(label) && String(value || '').trim() && String(value) !== '—';
     return `
     <div class="lead-detail-row">
       <div class="lead-detail-label">${escapeHtml(label)}</div>
       <div class="lead-detail-value">${escapeHtml(String(value))}</div>
+      ${canCopy ? `<button type="button" class="btn btn-sm btn-outline-secondary lead-copy-btn" onclick="copyLeadDetailValue(${JSON.stringify(String(value))}, ${JSON.stringify(copyLabel || label)})" title="Copy only this ${escapeHtml(label)}"><i class="bi bi-copy"></i> Copy *</button>` : ''}
     </div>`;
   }).join("");
 
