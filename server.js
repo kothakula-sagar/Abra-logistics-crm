@@ -2362,10 +2362,21 @@ function startManagementNotificationRealtimeListener() {
 }
 
 async function forwardMaintenanceModeToTelegram(enabled, changedBy) {
-  const users = await getManagementTelegramUsers();
+  // Maintenance mode is a CRM-wide event, so notify every active team member
+  // who has connected Telegram, regardless of their CRM role (Admin, HR,
+  // Sales, etc.). Keep the existing management recipient helper unchanged so
+  // other management notifications remain Admin/Super Admin only.
+  const snapshot = await db.collection('users').get();
+  const users = snapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
+    .filter(user =>
+      user.active !== false &&
+      user.telegramConnected === true &&
+      !!user.telegramChatId
+    );
 
   if (!users.length) {
-    console.log('ℹ️ No connected Admin/Super Admin Telegram accounts for maintenance mode alert.');
+    console.log('ℹ️ No connected team Telegram accounts for maintenance mode alert.');
     return;
   }
 
