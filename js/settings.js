@@ -709,7 +709,12 @@ async function saveMaintenanceMode() {
   const btn = document.querySelector('[onclick="saveMaintenanceMode()"]');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…'; }
   try {
-    await CRM_SETTINGS_DOC.set({ maintenanceMode: enabled }, { merge: true });
+    await CRM_SETTINGS_DOC.set({
+      maintenanceMode: enabled,
+      maintenanceModeUpdatedBy: CURRENT_USER.uid,
+      maintenanceModeUpdatedByName: CURRENT_USER.name || CURRENT_USER.email || 'Admin',
+      maintenanceModeUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
     toast(enabled ? "Maintenance mode enabled for non-admin users." : "Maintenance mode disabled. All users can use the CRM again.", "success");
   } catch (err) {
     console.error("Save maintenance mode failed:", err);

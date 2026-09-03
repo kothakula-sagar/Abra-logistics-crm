@@ -2104,14 +2104,16 @@ async function sendDailyManagementReport() {
 // ============================================================
 // REAL-TIME MANAGEMENT TELEGRAM NOTIFICATIONS
 // ============================================================
-// The marketing UI writes management-audience events to the
-// `notifications` collection. This server listener forwards only the
-// marketing events to every connected Admin / Super Admin Telegram account.
+// Management-audience events and CRM maintenance mode changes are
+// forwarded to every connected Admin / Super Admin Telegram account.
 // This keeps Telegram delivery server-side and independent of which CRM
 // page the management user currently has open.
 
 let managementNotificationListenerStarted = false;
 let managementNotificationInitialSnapshotComplete = false;
+let maintenanceModeListenerStarted = false;
+let maintenanceModeInitialSnapshotComplete = false;
+let maintenanceModeLastState = null;
 
 function managementTelegramNotificationMessage(data, recipient) {
   const metadata = data?.metadata || {};
@@ -2145,6 +2147,60 @@ function managementTelegramNotificationMessage(data, recipient) {
     lines.push(
       `<b>Body:</b> ${escapeHtml(metadata.body || data.message || '—')}`
     );
+
+    if (PUBLIC_BASE_URL) {
+      lines.push(
+        '',
+        `<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`
+      );
+    }
+
+    return lines.join('\n');
+  }
+
+  if (type === 'maintenance-mode-on') {
+    const changedBy = firstNonEmpty(
+      data.createdByName,
+      metadata.changedBy,
+      'Admin'
+    );
+    const lines = [
+      '🔧 <b>CRM MAINTENANCE MODE</b>',
+      '',
+      `<b>Hi ${escapeHtml(adminName)} Sir,</b>`,
+      '',
+      'The Abra Logistics CRM is currently in <b>Maintenance Mode</b>.',
+      'The CRM will be functional again once maintenance is completed.',
+      '',
+      `<b>Changed By:</b> ${escapeHtml(changedBy)}`
+    ];
+
+    if (PUBLIC_BASE_URL) {
+      lines.push(
+        '',
+        `<a href="${escapeHtml(`${PUBLIC_BASE_URL}/dashboard.html`)}">Open CRM</a>`
+      );
+    }
+
+    return lines.join('\n');
+  }
+
+  if (type === 'maintenance-mode-off') {
+    const changedBy = firstNonEmpty(
+      data.createdByName,
+      metadata.changedBy,
+      'Admin'
+    );
+    const lines = [
+      '✅ <b>CRM MAINTENANCE MODE DISABLED</b>',
+      '',
+      `<b>Hi ${escapeHtml(adminName)} Sir,</b>`,
+      '',
+      'The Abra Logistics CRM is <b>functional again</b>.',
+      'Maintenance Mode has been turned OFF.',
+      '',
+      `<b>Changed By:</b> ${escapeHtml(changedBy)}`
+    ];
 
     if (PUBLIC_BASE_URL) {
       lines.push(
@@ -2201,7 +2257,9 @@ async function forwardManagementNotificationToTelegram(
 
   if (
     type !== 'marketing-campaign-created' &&
-    type !== 'marketing-status-change'
+    type !== 'marketing-status-change' &&
+    type !== 'maintenance-mode-on' &&
+    type !== 'maintenance-mode-off'
   ) {
     return;
   }
@@ -2297,6 +2355,100 @@ function startManagementNotificationRealtimeListener() {
       error => {
         console.error(
           'Management Telegram notification listener error:',
+          error.message
+        );
+      }
+    );
+}
+
+async function forwardMaintenanceModeToTelegram(enabled, changedBy) {
+  const users = await getManagementTelegramUsers();
+
+  if (!users.length) {
+    console.log('ℹ️ No connected Admin/Super Admin Telegram accounts for maintenance mode alert.');
+    return;
+  }
+
+  const type = enabled ? 'maintenance-mode-on' : 'maintenance-mode-off';
+  const notificationId = `maintenance_mode_${enabled ? 'on' : 'off'}_${Date.now()}`;
+
+  for (const user of users) {
+    const deliveryId =
+      `${notificationId}_${user.id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const claimed = await claimDelivery(deliveryId, {
+      type: 'maintenanceMode',
+      memberId: user.id,
+      notificationType: type
+    });
+
+    if (!claimed) continue;
+
+    try {
+      const text = managementTelegramNotificationMessage(
+        {
+          type,
+          createdByName: changedBy,
+          metadata: { changedBy }
+        },
+        user
+      );
+
+      const result = await sendToMember(user.id, text);
+
+      if (!result.sent) {
+        await db.collection('telegramDeliveries').doc(deliveryId).delete().catch(() => {});
+        continue;
+      }
+
+      console.log(
+        `📨 Telegram maintenance mode alert sent: ${type} -> ${user.id}`
+      );
+    } catch (error) {
+      await db.collection('telegramDeliveries').doc(deliveryId).delete().catch(() => {});
+      console.error(
+        `Telegram maintenance mode alert failed for ${user.id}:`,
+        error.message
+      );
+    }
+  }
+}
+
+function startMaintenanceModeRealtimeListener() {
+  if (maintenanceModeListenerStarted) return;
+
+  maintenanceModeListenerStarted = true;
+  maintenanceModeInitialSnapshotComplete = false;
+
+  console.log('👂 Starting realtime CRM maintenance mode Telegram listener...');
+
+  db.collection('crmSettings')
+    .doc('general')
+    .onSnapshot(
+      snapshot => {
+        const enabled = snapshot.exists && snapshot.data()?.maintenanceMode === true;
+
+        if (!maintenanceModeInitialSnapshotComplete) {
+          maintenanceModeInitialSnapshotComplete = true;
+          maintenanceModeLastState = enabled;
+          return;
+        }
+
+        if (maintenanceModeLastState === enabled) return;
+        maintenanceModeLastState = enabled;
+
+        const changedBy = firstNonEmpty(
+          snapshot.data()?.maintenanceModeUpdatedByName,
+          'Admin'
+        );
+
+        forwardMaintenanceModeToTelegram(enabled, changedBy).catch(error => {
+          console.error('Maintenance mode Telegram notification error:', error.message);
+        });
+      },
+      error => {
+        console.error(
+          'Maintenance mode Telegram listener error:',
           error.message
         );
       }
@@ -4792,6 +4944,7 @@ app.listen(
       // Forward management-audience marketing events created by the CRM UI
       // to every connected Admin / Super Admin Telegram account.
       startManagementNotificationRealtimeListener();
+      startMaintenanceModeRealtimeListener();
 
       await runNotificationCycle();
 
