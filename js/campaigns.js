@@ -793,18 +793,50 @@ document.addEventListener("DOMContentLoaded", () => {
 // ============================================================
 // LEAD DETAILS MODAL (👁 View) — label:value layout
 // ============================================================
-function copyLeadDetailValue(value, label='Field') {
+async function copyLeadDetailValue(value, label = 'Field') {
   const text = String(value ?? '').trim();
   if (!text || text === '—') {
-    if (typeof toast === 'function') toast(`No ${label.toLowerCase()} available to copy.`, 'warning');
-    return;
+    if (typeof toast === 'function') toast(`No ${String(label).toLowerCase()} available to copy.`, 'warning');
+    return false;
   }
-  const done = () => { if (typeof toast === 'function') toast(`${label} copied.`, 'success'); };
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).then(done).catch(() => copyLeadDetailFallback(text, done));
-  } else {
-    copyLeadDetailFallback(text, done);
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      await copyLeadDetailFallback(text);
+    }
+
+    if (typeof toast === 'function') toast(`${label} copied to clipboard.`, 'success');
+    return true;
+  } catch (error) {
+    if (typeof toast === 'function') toast('Unable to copy to clipboard.', 'danger');
+    console.error('Clipboard copy failed:', error);
+    return false;
   }
+}
+
+function copyLeadDetailFallback(text) {
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+
+    try {
+      if (document.execCommand('copy')) resolve();
+      else reject(new Error('document.execCommand(\'copy\') returned false'));
+    } catch (e) {
+      reject(e);
+    } finally {
+      ta.remove();
+    }
+  });
 }
 
 function copyLeadDetailFallback(text, done) {
@@ -843,6 +875,28 @@ function copyLeadCampaignDetails(leadId) {
     return;
   }
   copyLeadDetailValue(text, 'Campaign Details');
+}
+
+function setupLeadDetailsCopyHandlers() {
+  const body = document.getElementById('leadDetailsModalBody');
+  if (!body || body.dataset.copyHandlersReady === 'true') return;
+
+  body.dataset.copyHandlersReady = 'true';
+  body.addEventListener('click', async (event) => {
+    const button = event.target.closest('.lead-copy-btn, .lead-copy-all-btn');
+    if (!button || !body.contains(button)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (button.classList.contains('lead-copy-all-btn')) {
+      const leadId = button.dataset.copyCampaignDetails;
+      if (leadId) await copyLeadCampaignDetails(leadId);
+      return;
+    }
+
+    await copyLeadDetailValue(button.dataset.copyValue || '', button.dataset.copyLabel || 'Field');
+  });
 }
 
 function openLeadDetailsModal(leadId) {
@@ -884,13 +938,14 @@ function openLeadDetailsModal(leadId) {
   }
 
   document.getElementById("leadDetailsModalTitle").textContent = `Sl.No ${lead.slNo} — ${lead.fullName}`;
+  setupLeadDetailsCopyHandlers();
   document.getElementById("leadDetailsModalBody").innerHTML = rows.map((r) => {
     if (r === "divider") return `<hr class="my-2">`;
     if (r === "__campaign_header__") return `
       <div class="d-flex justify-content-between align-items-center mb-2 mt-1">
         <div class="small fw-semibold text-muted">Campaign Details</div>
-        <button type="button" class="btn btn-sm btn-outline-primary lead-copy-all-btn" onclick="copyLeadCampaignDetails('${lead.id}')" title="Copy all Campaign Details for this customer">
-          <i class="bi bi-copy me-1"></i>Copy All *
+        <button type="button" class="btn btn-sm btn-outline-primary lead-copy-all-btn" data-copy-campaign-details="${escapeHtml(String(lead.id))}" title="Copy Campaign Details" aria-label="Copy Campaign Details">
+          <i class="bi bi-copy"></i>
         </button>
       </div>
       <div class="small text-muted mb-2">* Copies Campaign Details for this customer only.</div>`;
@@ -900,9 +955,15 @@ function openLeadDetailsModal(leadId) {
     <div class="lead-detail-row">
       <div class="lead-detail-label">${escapeHtml(label)}</div>
       <div class="lead-detail-value">${escapeHtml(String(value))}</div>
-      ${canCopy ? `<button type="button" class="btn btn-sm btn-outline-secondary lead-copy-btn" onclick="copyLeadDetailValue(${JSON.stringify(String(value))}, ${JSON.stringify(copyLabel || label)})" title="Copy only this ${escapeHtml(label)}"><i class="bi bi-copy"></i> Copy *</button>` : ''}
+      ${canCopy ? `<button type="button" class="btn btn-sm btn-outline-secondary lead-copy-btn" data-copy-value="${escapeHtml(String(value))}" data-copy-label="${escapeHtml(copyLabel || label)}" title="Copy ${escapeHtml(label)}" aria-label="Copy ${escapeHtml(label)}"><i class="bi bi-copy"></i></button>` : ''}
     </div>`;
   }).join("");
 
   new bootstrap.Modal(document.getElementById("leadDetailsModal")).show();
 }
+
+
+// Explicitly expose lead-detail actions for compatibility with dynamically rendered CRM UI.
+window.copyLeadDetailValue = copyLeadDetailValue;
+window.copyLeadCampaignDetails = copyLeadCampaignDetails;
+window.openLeadDetailsModal = openLeadDetailsModal;
