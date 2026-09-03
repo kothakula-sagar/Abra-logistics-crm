@@ -73,8 +73,11 @@
   }
 
   function renderCustomerCharts(customers) {
-    const root = document.getElementById('customerAnalyticsCharts');
-    if (!root || typeof Chart === 'undefined') return;
+    const ChartCtor = window.Chart;
+    if (typeof ChartCtor !== 'function') {
+      console.warn('[Customers] Chart.js is not available.');
+      return;
+    }
     destroyCustomerCharts();
 
     const days = lastSevenDays();
@@ -128,7 +131,7 @@
 
     const newCtx = document.getElementById('customerNew7DayChart');
     if (newCtx) {
-      customerCharts.newCustomers = new Chart(newCtx, {
+      customerCharts.newCustomers = new ChartCtor(newCtx, {
         type: 'line',
         data: {
           labels: dayLabels,
@@ -152,7 +155,7 @@
 
     const subscribedCtx = document.getElementById('customerSubscribedChart');
     if (subscribedCtx) {
-      customerCharts.subscribed = new Chart(subscribedCtx, {
+      customerCharts.subscribed = new ChartCtor(subscribedCtx, {
         type: 'doughnut',
         data: {
           labels: ['WhatsApp Only', 'Email Only', 'Both Subscribed', 'Unsubscribed'],
@@ -180,7 +183,7 @@
 
     const unsubscribedCtx = document.getElementById('customerUnsubscribedChart');
     if (unsubscribedCtx) {
-      customerCharts.unsubscribed = new Chart(unsubscribedCtx, {
+      customerCharts.unsubscribed = new ChartCtor(unsubscribedCtx, {
         type: 'line',
         data: {
           labels: dayLabels,
@@ -212,7 +215,7 @@
       const canvas = document.getElementById(id);
       if (!canvas) return;
       const key = id.replace('customer', '').replace('TrendChart', '');
-      customerCharts[key] = new Chart(canvas, {
+      customerCharts[key] = new ChartCtor(canvas, {
         type: 'bar',
         data: {
           labels: dayLabels,
