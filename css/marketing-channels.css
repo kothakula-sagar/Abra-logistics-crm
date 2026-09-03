@@ -180,3 +180,135 @@
 .marketing-email-detail-preview{margin-top:8px;border:1px solid #e6ebf0;border-radius:8px;padding:18px;background:#fff;overflow:auto}
 .marketing-email-detail-preview img{max-width:100%;height:auto}
 .marketing-email-detail-preview table{max-width:100%}
+
+
+/* Customers page visual analytics refresh. Customer Directory table styles remain untouched. */
+.customer-kpi-grid .marketing-stat {
+  min-height: 100px;
+}
+.customer-kpi {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:16px 18px;
+}
+.customer-kpi > div:first-child {
+  min-width:0;
+}
+.customer-kpi span {
+  display:block;
+  color:#64748b;
+  font-size:.72rem;
+  font-weight:700;
+  margin-bottom:4px;
+}
+.customer-kpi strong {
+  display:block;
+  color:#2563eb;
+  font-size:1.75rem;
+  line-height:1.05;
+  font-weight:800;
+}
+.customer-kpi strong.green { color:#43bf72; }
+.customer-kpi strong.purple { color:#6d42d9; }
+.customer-kpi small {
+  display:block;
+  color:#64748b;
+  font-size:.66rem;
+  margin-top:6px;
+}
+.customer-kpi-icon {
+  width:44px;
+  height:44px;
+  flex:0 0 44px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:1.2rem;
+}
+.customer-kpi-icon.blue { background:#eaf2ff; color:#3f82e8; }
+.customer-kpi-icon.green { background:#e8f8ee; color:#43bf72; }
+.customer-kpi-icon.purple { background:#f0e9ff; color:#7040df; }
+
+.customer-top-analytics .marketing-card,
+.customer-subscription-trend {
+  border-radius:12px;
+}
+.customer-top-chart {
+  padding:14px 16px 12px;
+}
+.customer-top-chart .marketing-card-title {
+  font-size:.82rem;
+  font-weight:800;
+}
+.customer-main-chart {
+  height:205px;
+  margin-top:8px;
+}
+.customer-donut-chart {
+  height:235px;
+  margin-top:4px;
+}
+.customer-chart-total {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:3px;
+}
+.customer-chart-total span:first-child {
+  color:#334155;
+  font-size:.72rem;
+  font-weight:700;
+}
+.customer-chart-total strong {
+  font-size:1.35rem;
+  color:#173a5b;
+  margin-left:auto;
+}
+.customer-trend-badge {
+  background:#e7f7ec;
+  color:#16a34a;
+  border-radius:999px;
+  padding:2px 7px;
+  font-size:.65rem;
+  font-weight:800;
+}
+.customer-trend-badge.red {
+  background:#ffeded;
+  color:#e53935;
+}
+.customer-subscription-trend {
+  padding:14px 16px 16px;
+}
+.customer-subscription-trend > .marketing-card-title {
+  font-size:.82rem;
+}
+.customer-trend-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:1.2rem;
+  margin-top:10px;
+}
+.customer-trend-title {
+  font-size:.72rem;
+  font-weight:800;
+  margin-bottom:4px;
+}
+.customer-trend-title.whatsapp { color:#43bf72; }
+.customer-trend-title.email { color:#4f8fe8; }
+.customer-trend-title.both { color:#f39a22; }
+.customer-trend-title.unsub { color:#e53935; }
+.customer-trend-wrap {
+  height:125px;
+  position:relative;
+}
+@media (max-width: 1100px) {
+  .customer-trend-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 768px) {
+  .customer-trend-grid { grid-template-columns:1fr; }
+  .customer-main-chart { height:190px; }
+  .customer-donut-chart { height:220px; }
+}

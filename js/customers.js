@@ -78,17 +78,52 @@
     destroyCustomerCharts();
 
     const days = lastSevenDays();
+    const dayLabels = days.map(d => d.label);
     const newCustomers = days.map(day => customers.filter(c => dayKey(c.createdAt) === day.key).length);
+
     const emailSubscribed = customers.filter(c => channelStatus(c, 'email') === 'Subscribed').length;
     const whatsappSubscribed = customers.filter(c => channelStatus(c, 'whatsapp') === 'Subscribed').length;
-    const emailUnsubscribed = customers.filter(c => channelStatus(c, 'email') === 'Unsubscribed').length;
-    const whatsappUnsubscribed = customers.filter(c => channelStatus(c, 'whatsapp') === 'Unsubscribed').length;
+    const bothSubscribed = customers.filter(c =>
+      channelStatus(c, 'email') === 'Subscribed' && channelStatus(c, 'whatsapp') === 'Subscribed'
+    ).length;
+    const emailOnly = customers.filter(c =>
+      channelStatus(c, 'email') === 'Subscribed' && channelStatus(c, 'whatsapp') !== 'Subscribed'
+    ).length;
+    const whatsappOnly = customers.filter(c =>
+      channelStatus(c, 'whatsapp') === 'Subscribed' && channelStatus(c, 'email') !== 'Subscribed'
+    ).length;
+    const unsubscribed = customers.filter(c =>
+      channelStatus(c, 'email') === 'Unsubscribed' && channelStatus(c, 'whatsapp') === 'Unsubscribed'
+    ).length;
 
-    const common = {
+    const newByDay = days.map(day => customers.filter(c => dayKey(c.createdAt) === day.key));
+    const dailyWhatsApp = newByDay.map(list => list.filter(c => channelStatus(c, 'whatsapp') === 'Subscribed').length);
+    const dailyEmail = newByDay.map(list => list.filter(c => channelStatus(c, 'email') === 'Subscribed').length);
+    const dailyBoth = newByDay.map(list => list.filter(c =>
+      channelStatus(c, 'email') === 'Subscribed' && channelStatus(c, 'whatsapp') === 'Subscribed'
+    ).length);
+    const dailyUnsubscribed = newByDay.map(list => list.filter(c =>
+      channelStatus(c, 'email') === 'Unsubscribed' && channelStatus(c, 'whatsapp') === 'Unsubscribed'
+    ).length);
+
+    const commonScale = {
+      x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
+      y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.16)' }, ticks: { precision: 0, color: '#64748b', font: { size: 10 } } }
+    };
+
+    const lineOptions = {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+      interaction: { intersect: false, mode: 'index' },
+      plugins: { legend: { display: false }, tooltip: { displayColors: false } },
+      scales: commonScale
+    };
+
+    const barOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { displayColors: false } },
+      scales: commonScale
     };
 
     const newCtx = document.getElementById('customerNew7DayChart');
@@ -96,36 +131,130 @@
       customerCharts.newCustomers = new Chart(newCtx, {
         type: 'line',
         data: {
-          labels: days.map(d => d.label),
-          datasets: [{ label: 'New Customers', data: newCustomers, tension: 0.3, fill: true }]
+          labels: dayLabels,
+          datasets: [{
+            label: 'New Customers',
+            data: newCustomers,
+            borderColor: '#1769e0',
+            backgroundColor: 'rgba(37, 99, 235, .13)',
+            pointBackgroundColor: '#1769e0',
+            pointBorderColor: '#1769e0',
+            pointRadius: 4,
+            pointHoverRadius: 5,
+            borderWidth: 2.5,
+            tension: .35,
+            fill: true
+          }]
         },
-        options: common
+        options: lineOptions
       });
     }
 
     const subscribedCtx = document.getElementById('customerSubscribedChart');
     if (subscribedCtx) {
       customerCharts.subscribed = new Chart(subscribedCtx, {
-        type: 'bar',
+        type: 'doughnut',
         data: {
-          labels: ['Email', 'WhatsApp'],
-          datasets: [{ label: 'Subscribed', data: [emailSubscribed, whatsappSubscribed] }]
+          labels: ['WhatsApp Only', 'Email Only', 'Both Subscribed', 'Unsubscribed'],
+          datasets: [{
+            data: [whatsappOnly, emailOnly, bothSubscribed, unsubscribed],
+            backgroundColor: ['#43bf72', '#4f8fe8', '#f39a22', '#e53935'],
+            borderWidth: 0,
+            hoverOffset: 4
+          }]
         },
-        options: common
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '58%',
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 7, padding: 14, color: '#475569', font: { size: 11 } }
+            },
+            tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw}` } }
+          }
+        }
       });
     }
 
     const unsubscribedCtx = document.getElementById('customerUnsubscribedChart');
     if (unsubscribedCtx) {
       customerCharts.unsubscribed = new Chart(unsubscribedCtx, {
-        type: 'bar',
+        type: 'line',
         data: {
-          labels: ['Email', 'WhatsApp'],
-          datasets: [{ label: 'Unsubscribed', data: [emailUnsubscribed, whatsappUnsubscribed] }]
+          labels: dayLabels,
+          datasets: [{
+            label: 'Unsubscribed',
+            data: dailyUnsubscribed,
+            borderColor: '#e53935',
+            backgroundColor: 'rgba(239, 68, 68, .12)',
+            pointBackgroundColor: '#e53935',
+            pointBorderColor: '#e53935',
+            pointRadius: 4,
+            pointHoverRadius: 5,
+            borderWidth: 2.5,
+            tension: .35,
+            fill: true
+          }]
         },
-        options: common
+        options: lineOptions
       });
     }
+
+    const trendCanvasIds = [
+      ['customerWhatsappTrendChart', dailyWhatsApp, '#43bf72'],
+      ['customerEmailTrendChart', dailyEmail, '#4f8fe8'],
+      ['customerBothTrendChart', dailyBoth, '#f39a22'],
+      ['customerUnsubTrendChart', dailyUnsubscribed, '#e53935']
+    ];
+    trendCanvasIds.forEach(([id, data, color]) => {
+      const canvas = document.getElementById(id);
+      if (!canvas) return;
+      const key = id.replace('customer', '').replace('TrendChart', '');
+      customerCharts[key] = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: dayLabels,
+          datasets: [{
+            data,
+            backgroundColor: color,
+            borderRadius: 2,
+            borderSkipped: false,
+            barPercentage: .55,
+            categoryPercentage: .72
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { displayColors: false } },
+          scales: commonScale
+        }
+      });
+    });
+  }
+
+  function customerMetricTrend(customers, selector) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentStart = new Date(today);
+    currentStart.setDate(today.getDate() - 6);
+    const previousStart = new Date(today);
+    previousStart.setDate(today.getDate() - 13);
+
+    const current = customers.filter(c => {
+      const d = toDate(c.createdAt);
+      return d && d >= currentStart && d <= new Date(today.getTime() + 86400000 - 1);
+    }).filter(selector).length;
+
+    const previous = customers.filter(c => {
+      const d = toDate(c.createdAt);
+      return d && d >= previousStart && d < currentStart;
+    }).filter(selector).length;
+
+    const pct = previous ? ((current - previous) / previous) * 100 : (current ? 100 : 0);
+    return { current, previous, pct };
   }
 
   function render() {
@@ -146,6 +275,12 @@
 
     const whatsappSubscribed = customers.filter(c => channelStatus(c, 'whatsapp') === 'Subscribed').length;
     const emailSubscribed = customers.filter(c => channelStatus(c, 'email') === 'Subscribed').length;
+    const days = lastSevenDays();
+    const newCustomers = days.map(day => customers.filter(c => dayKey(c.createdAt) === day.key).length);
+    const newByDay = days.map(day => customers.filter(c => dayKey(c.createdAt) === day.key));
+    const dailyUnsubscribed = newByDay.map(list => list.filter(c =>
+      channelStatus(c, 'email') === 'Unsubscribed' && channelStatus(c, 'whatsapp') === 'Unsubscribed'
+    ).length);
 
     body.innerHTML = `
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -159,23 +294,67 @@
           ${isActive() ? `<button class="btn btn-brand" onclick="window.MarketingChannels.openContactModal('email')"><i class="bi bi-person-plus me-1"></i>Add Customer</button>` : ''}
         </div>
       </div>
-      <div class="row g-2 mb-3">
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Total Customers</span><strong>${customers.length}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>WhatsApp Subscribed</span><strong>${whatsappSubscribed}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Email Subscribed</span><strong>${emailSubscribed}</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="marketing-stat"><span>Manual Customers</span><strong>${customers.filter(c=>c.source!=='lead').length}</strong></div></div>
-      </div>
-      <div class="marketing-card customer-analytics-card mb-3">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <div>
-            <div class="marketing-card-title">Customer Analytics</div>
-            <div class="small text-muted">Last 7 days · Based only on the customers already loaded in the CRM · No date selection</div>
+      <div class="row g-2 mb-3 customer-kpi-grid">
+        <div class="col-6 col-lg-3">
+          <div class="marketing-stat customer-kpi">
+            <div><span>Total Customers</span><strong>${customers.length}</strong><small>All customers in database</small></div>
+            <div class="customer-kpi-icon blue"><i class="bi bi-people-fill"></i></div>
           </div>
         </div>
-        <div id="customerAnalyticsCharts" class="customer-analytics-grid">
-          <div class="customer-chart-panel"><div class="customer-chart-title">New Customers · Last 7 Days</div><div class="customer-chart-wrap"><canvas id="customerNew7DayChart"></canvas></div></div>
-          <div class="customer-chart-panel"><div class="customer-chart-title">Subscribed Customers</div><div class="customer-chart-wrap"><canvas id="customerSubscribedChart"></canvas></div></div>
-          <div class="customer-chart-panel"><div class="customer-chart-title">Unsubscribed Customers</div><div class="customer-chart-wrap"><canvas id="customerUnsubscribedChart"></canvas></div></div>
+        <div class="col-6 col-lg-3">
+          <div class="marketing-stat customer-kpi">
+            <div><span>WhatsApp Subscribed</span><strong class="green">${whatsappSubscribed}</strong><small>${customers.length ? ((whatsappSubscribed / customers.length) * 100).toFixed(1) : '0.0'}% of total customers</small></div>
+            <div class="customer-kpi-icon green"><i class="bi bi-whatsapp"></i></div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="marketing-stat customer-kpi">
+            <div><span>Email Subscribed</span><strong>${emailSubscribed}</strong><small>${customers.length ? ((emailSubscribed / customers.length) * 100).toFixed(1) : '0.0'}% of total customers</small></div>
+            <div class="customer-kpi-icon blue"><i class="bi bi-envelope-fill"></i></div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="marketing-stat customer-kpi">
+            <div><span>Manual Customers</span><strong class="purple">${customers.filter(c=>c.source!=='lead').length}</strong><small>Added manually</small></div>
+            <div class="customer-kpi-icon purple"><i class="bi bi-person-plus-fill"></i></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-2 mb-3 customer-top-analytics">
+        <div class="col-lg-4">
+          <div class="marketing-card customer-analytics-card customer-top-chart">
+            <div class="marketing-card-title">New Customers (Last 7 Days)</div>
+            <div class="small text-muted">Daily new customers added</div>
+            <div class="customer-chart-wrap customer-main-chart"><canvas id="customerNew7DayChart"></canvas></div>
+            <div class="customer-chart-total"><span>Total New Customers (7 Days)</span><strong>${newCustomers.reduce((a,b)=>a+b,0)}</strong><span class="customer-trend-badge">↑</span></div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="marketing-card customer-analytics-card customer-top-chart">
+            <div class="marketing-card-title">Subscription Overview</div>
+            <div class="small text-muted">Subscription status distribution</div>
+            <div class="customer-chart-wrap customer-donut-chart"><canvas id="customerSubscribedChart"></canvas></div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="marketing-card customer-analytics-card customer-top-chart">
+            <div class="marketing-card-title">Unsubscribed Overview (7 Days)</div>
+            <div class="small text-muted">Daily unsubscribed customers</div>
+            <div class="customer-chart-wrap customer-main-chart"><canvas id="customerUnsubscribedChart"></canvas></div>
+            <div class="customer-chart-total"><span>Total Unsubscribed (7 Days)</span><strong>${dailyUnsubscribed.reduce((a,b)=>a+b,0)}</strong><span class="customer-trend-badge red">↑</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="marketing-card customer-subscription-trend mb-3">
+        <div class="marketing-card-title">Subscription Trend (Last 7 Days)</div>
+        <div class="small text-muted">Daily subscription and unsubscription trends</div>
+        <div class="customer-trend-grid">
+          <div><div class="customer-trend-title whatsapp">WhatsApp Subscribed</div><div class="customer-trend-wrap"><canvas id="customerWhatsappTrendChart"></canvas></div></div>
+          <div><div class="customer-trend-title email">Email Subscribed</div><div class="customer-trend-wrap"><canvas id="customerEmailTrendChart"></canvas></div></div>
+          <div><div class="customer-trend-title both">Both Subscribed</div><div class="customer-trend-wrap"><canvas id="customerBothTrendChart"></canvas></div></div>
+          <div><div class="customer-trend-title unsub">Unsubscribed</div><div class="customer-trend-wrap"><canvas id="customerUnsubTrendChart"></canvas></div></div>
         </div>
       </div>
       <div class="marketing-card">
