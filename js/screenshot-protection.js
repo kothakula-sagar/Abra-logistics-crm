@@ -1,32 +1,30 @@
 // ============================================================
-// SCREENSHOT PROTECTION / EMERGENCY MAINTENANCE MODE
+// SCREENSHOT SECURITY / EMERGENCY MAINTENANCE MODE
 // ============================================================
-// Detects screenshot attempts that are observable from the browser:
-//   - Print Screen / PrtSc (keydown + keyup + legacy keyCode 44)
-//   - Windows + Shift + S / Snipping Tool (when Chromium exposes the
-//     Windows/Meta modifier; also uses a guarded focus-loss heuristic)
-//   - Common browser screenshot shortcut Ctrl/Cmd + Shift + S
+// Browser-side security layer. It detects screenshot shortcuts that
+// Chromium exposes and immediately asks the server to enable global
+// Maintenance Mode for non-admin users.
 //
-// IMPORTANT: Windows can consume a screenshot shortcut before the page
-// receives the key event. A website cannot receive a universal OS-level
-// screenshot notification. The guarded blur heuristic improves detection
-// for Snipping Tool without treating every normal blur as a screenshot.
-// The server remains authoritative and activates Maintenance Mode for the
-// entire CRM. Admin/Super Admin are bypassed server-side.
+// NOTE: Windows may consume Win+PrtSc / Win+Shift+S before Chrome gets
+// the event. A normal webpage cannot block an OS screenshot globally.
+// The code below therefore uses every browser-observable signal without
+// breaking ordinary CRM typing/navigation.
 // ============================================================
 (function () {
   'use strict';
 
   const API_BASE = String(window.TELEGRAM_API_BASE_URL || '').replace(/\/$/, '');
   const TRIGGER_COOLDOWN_MS = 10000;
-  const SNIP_FOCUS_LOSS_WINDOW_MS = 1800;
+  const SNIP_FOCUS_LOSS_WINDOW_MS = 5000;
+  const MODIFIER_MEMORY_MS = 5000;
 
   let lastTriggerAt = 0;
   let currentUser = null;
   let notificationUnsubscribe = null;
-  let notificationsReady = false;
-  let shiftPressedAt = 0;
-  let sPressedAfterShift = false;
+  let notificationListenerReady = false;
+  let shiftDownAt = 0;
+  let metaDownAt = 0;
+  let winShiftComboArmed = false;
   let blurTimer = null;
 
   function getApiUrl(path) {
@@ -48,8 +46,32 @@
     return role === 'admin' || role === 'superadmin' || role === 'super_admin';
   }
 
-  function isWindowsLike() {
-    return /Win/i.test(navigator.platform || navigator.userAgent || '');
+  function isWindows() {
+    return /Win/i.test(navigator.userAgent || navigator.platform || '');
+  }
+
+  function isPrintScreen(event) {
+    const key = String(event.key || '').toLowerCase();
+    const code = String(event.code || '').toLowerCase();
+    return key === 'printscreen' || code === 'printscreen' ||
+      event.keyCode === 44 || event.which === 44;
+  }
+
+  function markModifierState(event) {
+    const key = String(event.key || '').toLowerCase();
+    const now = performance.now();
+    if (key === 'shift' || event.shiftKey) shiftDownAt = now;
+    if (key === 'meta' || event.getModifierState?.('Meta') || event.getModifierState?.('OS')) {
+      metaDownAt = now;
+    }
+  }
+
+  function hasRecentShift() {
+    return shiftDownAt > 0 && performance.now() - shiftDownAt <= MODIFIER_MEMORY_MS;
+  }
+
+  function hasRecentWindowsKey() {
+    return metaDownAt > 0 && performance.now() - metaDownAt <= MODIFIER_MEMORY_MS;
   }
 
   async function triggerScreenshotProtection(source) {
@@ -58,6 +80,12 @@
     const now = Date.now();
     if (now - lastTriggerAt < TRIGGER_COOLDOWN_MS) return;
     lastTriggerAt = now;
+
+    // Lock this browser immediately if the maintenance UI is available.
+    // The server remains authoritative and updates Firestore for everyone.
+    if (typeof window.setMaintenanceMode === 'function') {
+      window.setMaintenanceMode(true);
+    }
 
     try {
       const token = await getFirebaseToken();
@@ -77,119 +105,116 @@
         throw new Error(data.error || `Screenshot protection request failed (${response.status})`);
       }
 
-      // Do not wait for the Firestore settings listener before locking the
-      // current browser. Other users will receive the Firestore update.
       if (data.activated && typeof window.setMaintenanceMode === 'function') {
         window.setMaintenanceMode(true);
       }
     } catch (error) {
       console.error('Screenshot protection error:', error);
-      // The server remains authoritative. Do not break normal CRM usage if
-      // the API is temporarily unavailable.
     }
   }
 
-  function getMetaOrOSModifier(event) {
-    return !!(
-      event.metaKey ||
-      event.getModifierState?.('Meta') ||
-      event.getModifierState?.('OS')
-    );
-  }
-
-  function getPrintScreenEvent(event) {
-    const key = String(event.key || '').toLowerCase();
-    const code = String(event.code || '').toLowerCase();
-    return key === 'printscreen' || code === 'printscreen' || event.keyCode === 44 || event.which === 44;
+  function consumeScreenshotShortcut(event, source) {
+    // Stop CRM controls from handling the shortcut too.
+    try {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    } catch (_) {}
+    triggerScreenshotProtection(source);
   }
 
   function handleKeydown(event) {
+    if (!currentUser || isPrivilegedUser()) return;
+
     const key = String(event.key || '').toLowerCase();
-    const hasWindowsModifier = getMetaOrOSModifier(event);
+    const code = String(event.code || '').toLowerCase();
+    markModifierState(event);
 
-    // Windows Print Screen / PrtSc.
-    if (getPrintScreenEvent(event)) {
-      triggerScreenshotProtection('Print Screen / PrtSc');
+    // PrtSc / Print Screen in Chrome.
+    if (isPrintScreen(event)) {
+      consumeScreenshotShortcut(event, 'Print Screen / PrtSc');
       return;
     }
 
-    // Remember Shift briefly. Snipping Tool may consume the S/Windows key
-    // before the browser gets the complete shortcut.
-    if (event.shiftKey || key === 'shift') {
-      if (!shiftPressedAt) shiftPressedAt = performance.now();
-    }
-
-    if (shiftPressedAt && key === 's') {
-      sPressedAfterShift = true;
-    }
-
-    // Windows + Shift + S / Snipping Tool when Chromium exposes Meta/OS.
-    if (event.shiftKey && key === 's' && hasWindowsModifier) {
-      triggerScreenshotProtection('Windows + Shift + S / Snipping Tool');
+    // Track the Windows modifier even when Chrome does not expose it on S.
+    if (key === 'meta' || code === 'metaleft' || code === 'metaright') {
+      metaDownAt = performance.now();
       return;
     }
 
-    // Browser screenshot shortcut: Ctrl/Cmd + Shift + S.
-    if (event.shiftKey && key === 's' && event.ctrlKey) {
-      triggerScreenshotProtection('Browser screenshot shortcut');
+    if (key === 'shift' || code === 'shiftleft' || code === 'shiftright') {
+      shiftDownAt = performance.now();
+      return;
+    }
+
+    // Best case: Chromium exposes Win/Meta + Shift + S.
+    if (key === 's' && event.shiftKey &&
+        (event.metaKey || event.getModifierState?.('Meta') || event.getModifierState?.('OS'))) {
+      consumeScreenshotShortcut(event, 'Windows + Shift + S / Snipping Tool');
+      return;
+    }
+
+    // If the Windows key is exposed as a preceding keydown but is absent
+    // from the S event, use the short-lived modifier memory.
+    if (isWindows() && key === 's' && event.shiftKey && hasRecentWindowsKey()) {
+      consumeScreenshotShortcut(event, 'Windows + Shift + S / Snipping Tool');
+      return;
+    }
+
+    // Ctrl+Shift+S / browser screenshot shortcut.
+    if (key === 's' && event.shiftKey && event.ctrlKey) {
+      consumeScreenshotShortcut(event, 'Browser screenshot shortcut');
     }
   }
 
   function handleKeyup(event) {
-    // Some Chromium/Edge builds expose Print Screen on keyup instead of
-    // keydown, so listen to both.
-    if (getPrintScreenEvent(event)) {
-      triggerScreenshotProtection('Print Screen / PrtSc');
+    if (!currentUser || isPrivilegedUser()) return;
+
+    if (isPrintScreen(event)) {
+      consumeScreenshotShortcut(event, 'Print Screen / PrtSc');
+      return;
     }
 
     const key = String(event.key || '').toLowerCase();
-    if (key === 'shift') {
-      shiftPressedAt = 0;
-      sPressedAfterShift = false;
-    }
+    const code = String(event.code || '').toLowerCase();
+    if (key === 'shift' || code === 'shiftleft' || code === 'shiftright') shiftDownAt = 0;
+    if (key === 'meta' || code === 'metaleft' || code === 'metaright') metaDownAt = 0;
   }
 
   function handleBlur() {
-    if (!isWindowsLike() || !currentUser || isPrivilegedUser()) return;
-    if (!shiftPressedAt) return;
+    if (!isWindows() || !currentUser || isPrivilegedUser()) return;
 
-    const elapsed = performance.now() - shiftPressedAt;
-    if (elapsed > SNIP_FOCUS_LOSS_WINDOW_MS) return;
+    // Snipping Tool can steal focus before Chrome receives S.
+    // Only arm this when Shift + Windows was observed very recently.
+    const shiftRecent = hasRecentShift();
+    const windowsRecent = hasRecentWindowsKey();
+    if (!shiftRecent && !windowsRecent) return;
 
-    // Snipping Tool can take focus before the browser receives the S key.
-    // A Shift-held focus loss in this very short window is treated as a
-    // Snipping Tool attempt. This is deliberately narrow to reduce false
-    // positives from ordinary tab switching.
     clearTimeout(blurTimer);
     blurTimer = setTimeout(() => {
-      const age = performance.now() - shiftPressedAt;
-      if (shiftPressedAt && age <= SNIP_FOCUS_LOSS_WINDOW_MS) {
-        triggerScreenshotProtection(
-          sPressedAfterShift
-            ? 'Windows + Shift + S / Snipping Tool'
-            : 'Windows + Shift + S / Snipping Tool (focus-loss detection)'
-        );
+      if (hasRecentShift() && (hasRecentWindowsKey() || winShiftComboArmed || document.hidden)) {
+        triggerScreenshotProtection('Windows + Shift + S / Snipping Tool');
       }
-    }, 50);
+    }, 40);
   }
 
-  function handleFocus() {
-    clearTimeout(blurTimer);
+  function handleVisibilityChange() {
+    if (!document.hidden || !currentUser || isPrivilegedUser()) return;
+    if (hasRecentShift() && (hasRecentWindowsKey() || winShiftComboArmed)) {
+      triggerScreenshotProtection('Windows + Shift + S / Snipping Tool');
+    }
   }
 
   function subscribeScreenshotNotifications() {
     if (!window.notificationsRef || !currentUser?.uid) return;
     if (notificationUnsubscribe) notificationUnsubscribe();
 
-    notificationsReady = false;
-    // Query only by userId so this does not require a composite Firestore
-    // index for userId + type. Filter the security notification client-side.
+    notificationListenerReady = false;
     notificationUnsubscribe = window.notificationsRef
       .where('userId', '==', currentUser.uid)
       .limit(50)
       .onSnapshot(snapshot => {
         snapshot.docChanges().forEach(change => {
-          if (change.type !== 'added' || !notificationsReady) return;
+          if (change.type !== 'added' || !notificationListenerReady) return;
           const data = change.doc.data() || {};
           if (data.type !== 'screenshot-security') return;
           const title = data.title || 'CRM Security Alert';
@@ -197,36 +222,38 @@
           if (typeof toast === 'function') toast(message, 'danger');
           if (typeof browserNotify === 'function') browserNotify(title, message);
         });
-        notificationsReady = true;
+        notificationListenerReady = true;
       }, error => console.error('Screenshot notification listener error:', error));
   }
 
+  function bindAuth() {
+    if (!window.auth?.onAuthStateChanged) return false;
+    window.auth.onAuthStateChanged(user => {
+      currentUser = user || null;
+      if (!user) {
+        if (notificationUnsubscribe) notificationUnsubscribe();
+        notificationUnsubscribe = null;
+        return;
+      }
+      subscribeScreenshotNotifications();
+    });
+    return true;
+  }
+
   function init() {
-    // Capture phase gives this handler the earliest practical chance to see
-    // screenshot-related keyboard events before CRM controls process them.
     document.addEventListener('keydown', handleKeydown, { capture: true });
     document.addEventListener('keyup', handleKeyup, { capture: true });
     window.addEventListener('blur', handleBlur, { capture: true });
-    window.addEventListener('focus', handleFocus, { capture: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange, { capture: true });
 
-    if (window.auth?.onAuthStateChanged) {
-      window.auth.onAuthStateChanged(user => {
-        currentUser = user || null;
-        if (!user) {
-          if (notificationUnsubscribe) notificationUnsubscribe();
-          notificationUnsubscribe = null;
-          return;
-        }
-        subscribeScreenshotNotifications();
-      });
+    // Script is now loaded after Firebase/Auth, but keep a small fallback for
+    // deployments that reorder scripts.
+    if (!bindAuth()) {
+      const retry = setInterval(() => {
+        if (bindAuth()) clearInterval(retry);
+      }, 100);
+      setTimeout(() => clearInterval(retry), 10000);
     }
-
-    document.addEventListener('fbReady', () => {
-      if (window.auth?.currentUser) {
-        currentUser = window.auth.currentUser;
-        subscribeScreenshotNotifications();
-      }
-    });
   }
 
   window.triggerScreenshotProtection = triggerScreenshotProtection;
