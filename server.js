@@ -3923,6 +3923,149 @@ app.get(
 
 
 // ============================================================
+// SCREENSHOT SECURITY / EMERGENCY MAINTENANCE MODE
+// ============================================================
+
+function formatIndiaTime(date = new Date()) {
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  }).format(date);
+}
+
+async function getActiveCRMUsersForSecurityAlert() {
+  const snapshot = await db.collection('users').get();
+  return snapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
+    .filter(user => user.active !== false);
+}
+
+async function sendScreenshotTelegramAlert(users, message) {
+  const results = { sent: 0, skipped: 0, failed: 0 };
+
+  for (const user of users) {
+    if (!user.telegramConnected || !user.telegramChatId) {
+      results.skipped += 1;
+      continue;
+    }
+
+    try {
+      await sendToMember(user.id, message);
+      results.sent += 1;
+    } catch (error) {
+      results.failed += 1;
+      console.error(`Screenshot Telegram alert failed for ${user.id}:`, error.message);
+    }
+  }
+
+  return results;
+}
+
+app.post(
+  '/api/security/screenshot-detected',
+  verifyFirebaseUser,
+  async (req, res) => {
+    try {
+      const actor = req.crmUser;
+      const role = normalizeRole(actor.role);
+
+      if (role === 'admin' || role === 'superadmin' || role === 'super_admin') {
+        return res.json({ ok: true, activated: false, reason: 'privileged-user' });
+      }
+
+      const settingsRef = db.collection('crmSettings').doc('general');
+      const settingsSnap = await settingsRef.get();
+      const settings = settingsSnap.exists ? settingsSnap.data() : {};
+
+      // Do not repeatedly spam the whole team when Maintenance Mode is already ON.
+      if (settings.maintenanceMode === true) {
+        return res.json({ ok: true, activated: false, reason: 'already-active' });
+      }
+
+      const detectedAt = new Date();
+      const displayName = actor.name || actor.email || 'Unknown User';
+      const displayTime = formatIndiaTime(detectedAt);
+      const message = [
+        '🚨 CRM Maintenance Mode Activated',
+        `User: ${displayName}`,
+        'Reason: Screenshot detected',
+        `Time: ${displayTime}`,
+        'Admin/Super Admin action required.'
+      ].join('\n');
+
+      await settingsRef.set({
+        maintenanceMode: true,
+        maintenanceModeReason: 'Screenshot detected',
+        maintenanceModeTriggeredBy: actor.id,
+        maintenanceModeTriggeredByName: displayName,
+        maintenanceModeTriggeredAt: FieldValue.serverTimestamp(),
+        maintenanceModeTriggerSource: String(req.body?.source || 'screenshot-shortcut')
+      }, { merge: true });
+
+      const users = await getActiveCRMUsersForSecurityAlert();
+      const batch = db.batch();
+      const createdNotifications = [];
+
+      for (const user of users) {
+        const notificationRef = db.collection('notifications').doc();
+        batch.set(notificationRef, {
+          userId: user.id,
+          title: '🚨 CRM Security Alert',
+          message,
+          type: 'screenshot-security',
+          metadata: {
+            reason: 'Screenshot detected',
+            triggeredBy: actor.id,
+            triggeredByName: displayName,
+            triggerSource: String(req.body?.source || 'screenshot-shortcut')
+          },
+          createdBy: actor.id,
+          createdByName: displayName,
+          createdAt: FieldValue.serverTimestamp(),
+          read: false
+        });
+        createdNotifications.push(user.id);
+      }
+
+      if (createdNotifications.length) {
+        await batch.commit();
+      }
+
+      const telegram = await sendScreenshotTelegramAlert(
+        users,
+        [
+          '<b>🚨 CRM Maintenance Mode Activated</b>',
+          `User: ${escapeHtml(displayName)}`,
+          'Reason: Screenshot detected',
+          `Time: ${escapeHtml(displayTime)}`,
+          'Admin/Super Admin action required.'
+        ].join('\n')
+      );
+
+      res.json({
+        ok: true,
+        activated: true,
+        message,
+        notificationCount: createdNotifications.length,
+        telegram
+      });
+    } catch (error) {
+      console.error('Screenshot security handler error:', error.message);
+      res.status(isFirestoreQuotaError(error) ? 503 : 500).json({
+        ok: false,
+        error: publicFirebaseError(error)
+      });
+    }
+  }
+);
+
+
+// ============================================================
 // TELEGRAM STATUS
 // ============================================================
 
