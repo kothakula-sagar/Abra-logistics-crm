@@ -27,7 +27,6 @@
       callAudit: { view: true, submit: false, approve: true, reject: true, recall: true, viewRecording: true },
       reports: { view: true, export: true },
       emailMarketing: { view: true },
-      whatsappMarketing: { view: true },
       customers: { view: true },
       docs: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: true, approve: false, reject: false },
@@ -58,7 +57,6 @@
       callAudit: { view: false, submit: true, approve: false, reject: false, recall: false, viewRecording: false },
       reports: { view: true, export: true },
       emailMarketing: { view: false },
-      whatsappMarketing: { view: false },
       customers: { view: true },
       docs: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: false, approve: false, reject: false },
@@ -89,7 +87,6 @@
       callAudit: { view: false, submit: false, approve: false, reject: false, recall: false, viewRecording: false },
       reports: { view: false, export: false },
       emailMarketing: { view: false },
-      whatsappMarketing: { view: false },
       customers: { view: true },
       docs: { view: true },
       leave: { view: true, apply: true, cancelOwn: true, viewAll: false, approve: false, reject: false },
@@ -110,7 +107,6 @@
       callAudit: { view: false, submit: false, approve: false, reject: false, recall: false, viewRecording: false },
       reports: { view: true, export: true },
       emailMarketing: { view: false },
-      whatsappMarketing: { view: false },
       customers: { view: true },
       docs: { view: false },
       leave: { view: false, apply: false, cancelOwn: false, viewAll: false, approve: false, reject: false },
@@ -337,9 +333,6 @@
       { title: 'Email Marketing', key: 'emailMarketing', permissions: [
         ['emailMarketing.view', 'View Email Marketing']
       ] },
-      { title: 'WhatsApp Marketing', key: 'whatsappMarketing', permissions: [
-        ['whatsappMarketing.view', 'View WhatsApp Marketing']
-      ] },
       { title: 'Leave Management', key: 'leave', permissions: [
         ['leave.view', 'View Leave'],
         ['leave.apply', 'Apply Leave'],
@@ -522,7 +515,6 @@
     callaudit: 'callAudit.view',
     report: 'reports.view',
     emailmarketing: 'emailMarketing.view',
-    whatsappmarketing: 'whatsappMarketing.view',
     customers: 'customers.view',
     docs: 'docs.view',
     leave: 'leave.view',

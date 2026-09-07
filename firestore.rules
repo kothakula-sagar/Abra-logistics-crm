@@ -382,7 +382,6 @@ service cloud.firestore {
         || (
           isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'whatsappMarketingMessagesPerBatch', 'whatsappMarketingCooldownMinutes',
             'emailMarketingMessagesPerBatch', 'emailMarketingCooldownMinutes',
             'marketingCooldownVoiceAnnouncements'
           ])
@@ -572,8 +571,7 @@ service cloud.firestore {
     //
     // All active CRM users can view/add/edit marketing customers and
     // change channel subscription status. Admin + Super Admin can delete.
-    // Email/WhatsApp campaign data is restricted to Super Admin, Admin,
-    // and Marketing roles.
+    // Email campaign data is restricted to Super Admin, Admin, and Marketing roles.
     // The client uses this small contact cache instead of issuing
     // another full /leads query every time a marketing screen opens.
     // ============================================================
@@ -581,16 +579,22 @@ service cloud.firestore {
     match /marketingContacts/{contactId} {
       // All active CRM users can add customers.
       allow create: if isSignedIn()
-        && myUserDoc().data.active == true;
+        && myUserDoc().data.active == true
+        && request.resource.data.email is string
+        && request.resource.data.email.size() > 0;
 
       // Everyone with Customers access can change ONLY channel subscription
       // state and its audit metadata. Profile/company fields remain admin-only.
-      allow update: if isStaff()
+      allow update: if (request.resource.data.email is string
+        && request.resource.data.email.size() > 0
+        && isStaff())
         || (
           isSignedIn()
           && myUserDoc().data.active == true
+          && request.resource.data.email is string
+          && request.resource.data.email.size() > 0
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'emailStatus', 'whatsappStatus', 'marketingStatus',
+            'emailStatus', 'marketingStatus',
             'updatedAt', 'updatedBy', 'updatedByName'
           ])
         );
@@ -602,11 +606,6 @@ service cloud.firestore {
     }
 
     match /emailMarketingCampaigns/{campaignId} {
-      allow read, create, update: if isStaff() || isMarketing();
-      allow delete: if isAdmin() || isSuperAdmin();
-    }
-
-    match /whatsappMarketingCampaigns/{campaignId} {
       allow read, create, update: if isStaff() || isMarketing();
       allow delete: if isAdmin() || isSuperAdmin();
     }
@@ -765,7 +764,9 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.get('userId', null) == request.auth.uid;
 
-      allow update: if isStaff()
+      allow update: if (request.resource.data.email is string
+        && request.resource.data.email.size() > 0
+        && isStaff())
         || (
           isSignedIn()
           && resource.data.get('userId', null) == request.auth.uid

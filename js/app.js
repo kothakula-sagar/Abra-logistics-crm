@@ -40,7 +40,7 @@ async function initApp() {
   subscribeCampaigns();
 
   // Prime the shared MarketingChannels cache once. Reports, Customers,
-  // Email and WhatsApp all consume this same in-memory dataset, so opening
+  // Email marketing consumes the shared customer dataset, so opening
   // Reports does not issue another Firebase read.
   if (["superadmin", "admin", "marketing"].includes(CURRENT_USER.role) && window.MarketingChannels?.preload) {
     await window.MarketingChannels.preload();
@@ -185,7 +185,6 @@ function buildNav() {
   const canViewPermissions = isSA;
   const isMarketingRole = CURRENT_USER?.role === "marketing";
   const canViewEmailMarketing = isMarketingRole || hasPermission("emailMarketing.view");
-  const canViewWhatsAppMarketing = isMarketingRole || hasPermission("whatsappMarketing.view");
   const canViewCustomers = isMarketingRole || hasPermission("customers.view");
   const canViewDocs = !isMarketingRole && !!CURRENT_USER?.active;
 
@@ -197,7 +196,6 @@ function buildNav() {
       <a href="#" class="nav-link nav-item-link" data-view="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a href="#" class="nav-link nav-item-link" data-view="customers"><i class="bi bi-people"></i> Customers</a>
       <a href="#" class="nav-link nav-item-link" data-view="emailmarketing"><i class="bi bi-envelope-at"></i> Email Marketing</a>
-      <a href="#" class="nav-link nav-item-link" data-view="whatsappmarketing"><i class="bi bi-whatsapp"></i> WhatsApp Marketing</a>
       <a href="#" class="nav-link nav-item-link" data-view="report"><i class="bi bi-file-earmark-bar-graph"></i> Daily Report</a>`;
     nav.innerHTML = html;
     document.querySelectorAll(".nav-item-link").forEach((link) => {
@@ -288,13 +286,6 @@ function buildNav() {
     </a>`;
   }
 
-  if (canViewWhatsAppMarketing) {
-    html += `
-    <a href="#" class="nav-link nav-item-link" data-view="whatsappmarketing">
-      <i class="bi bi-whatsapp"></i> WhatsApp Marketing
-    </a>`;
-  }
-
   if (canViewCustomers) {
     html += `
     <a href="#" class="nav-link nav-item-link" data-view="customers">
@@ -355,8 +346,8 @@ function canAccessView(viewName) {
     return viewName === "dashboard";
   }
   if (CURRENT_USER && CURRENT_USER.role === "superadmin") return true;
-  if (CURRENT_USER?.role === "marketing") return ["dashboard", "customers", "emailmarketing", "whatsappmarketing", "report"].includes(viewName);
-  if (CURRENT_USER?.active && ["dashboard", "customers", "docs", "emailmarketing", "whatsappmarketing"].includes(viewName)) return true;
+  if (CURRENT_USER?.role === "marketing") return ["dashboard", "customers", "emailmarketing", "report"].includes(viewName);
+  if (CURRENT_USER?.active && ["dashboard", "customers", "docs", "emailmarketing"].includes(viewName)) return true;
   const requiredPermission = window.PERMISSION_VIEW_PATHS && window.PERMISSION_VIEW_PATHS[viewName];
   return !requiredPermission || hasPermission(requiredPermission);
 }
@@ -487,10 +478,6 @@ function showView(viewName) {
 
     if (viewName === "emailmarketing") {
       if (window.MarketingChannels) window.MarketingChannels.openView("email");
-    }
-
-    if (viewName === "whatsappmarketing") {
-      if (window.MarketingChannels) window.MarketingChannels.openView("whatsapp");
     }
 
     if (viewName === "users") {

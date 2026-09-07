@@ -68,7 +68,7 @@ function inReportRange(value, range) {
 function getLoadedMarketingData() {
   const data = window.MarketingChannels?.getReportData?.();
   if (data) return data;
-  return { customers: [], emailCampaigns: [], whatsappCampaigns: [] };
+  return { customers: [], emailCampaigns: [] };
 }
 
 function getLoadedLeads() {
@@ -89,11 +89,7 @@ function getReportDataset() {
   const data = getLoadedMarketingData();
   const customers = data.customers || [];
   const emailCampaigns = data.emailCampaigns || [];
-  const whatsappCampaigns = data.whatsappCampaigns || [];
-  const allCampaigns = [
-    ...emailCampaigns.map(c => ({ ...c, channel: 'Email' })),
-    ...whatsappCampaigns.map(c => ({ ...c, channel: 'WhatsApp' }))
-  ];
+  const allCampaigns = emailCampaigns.map(c => ({ ...c, channel: 'Email' }));
 
   const customersAdded = customers.filter(c => inReportRange(c.createdAt, range));
   const customerUpdates = customers.filter(c => {
@@ -106,8 +102,6 @@ function getReportDataset() {
 
   const emailEvents = emailCampaigns.flatMap(c => campaignMessageEvents(c, 'Email').map(e => ({ ...e, campaign: c, channel: 'Email' })))
     .filter(e => inReportRange(e.eventAt, range));
-  const whatsappEvents = whatsappCampaigns.flatMap(c => campaignMessageEvents(c, 'WhatsApp').map(e => ({ ...e, campaign: c, channel: 'WhatsApp' })))
-    .filter(e => inReportRange(e.eventAt, range));
 
   const leadRows = getLoadedLeads().filter(l => inReportRange(l.createdAt, range));
   const leadStatusCounts = {};
@@ -116,8 +110,8 @@ function getReportDataset() {
   return {
     range, customers, customersAdded, customerUpdates,
     allCampaigns, campaignsCreated,
-    emailCampaigns, whatsappCampaigns,
-    emailEvents, whatsappEvents, leadRows, leadStatusCounts
+    emailCampaigns,
+    emailEvents, leadRows, leadStatusCounts
   };
 }
 
@@ -193,20 +187,18 @@ function renderDailyReport() {
   if (!grid || !box) return;
 
   const d = getReportDataset();
-  const totalMessages = d.emailEvents.length + d.whatsappEvents.length;
+  const totalMessages = d.emailEvents.length;
   const emailCampaignsCreated = d.campaignsCreated.filter(c => c.channel === 'Email').length;
-  const whatsappCampaignsCreated = d.campaignsCreated.filter(c => c.channel === 'WhatsApp').length;
   const leadTotal = d.leadRows.length;
 
   grid.innerHTML = [
     statCard('New Customers', d.customersAdded.length, 'Added in selected period', '👥'),
     statCard('Customer Updates', d.customerUpdates.length, 'Subscription/profile changes', '✏️'),
-    statCard('Campaigns Created', d.campaignsCreated.length, `${emailCampaignsCreated} Email · ${whatsappCampaignsCreated} WhatsApp`, '📣'),
+    statCard('Campaigns Created', d.campaignsCreated.length, `${emailCampaignsCreated} Email`, '📣'),
     statCard('Email Initiated', d.emailEvents.length, 'Sent from CRM', '✉️'),
-    statCard('WhatsApp Initiated', d.whatsappEvents.length, 'Sent from CRM', '💬'),
-    statCard('Total CRM Activity', totalMessages, 'Email + WhatsApp initiated', '📊'),
+    statCard('Total CRM Activity', totalMessages, 'Email initiated', '📊'),
     statCard('Leads Received', leadTotal, 'From the loaded Leads dataset', '📋'),
-    statCard('Subscribed Customers', d.customers.filter(c => c.emailStatus === 'Subscribed' || c.whatsappStatus === 'Subscribed').length, 'At least one active channel', '✅')
+    statCard('Subscribed Customers', d.customers.filter(c => c.emailStatus === 'Subscribed' || c.marketingStatus === 'Subscribed').length, 'Email subscribed customers', '✅')
   ].join('');
 
   box.textContent = buildProfessionalReportMessage(d);
@@ -221,7 +213,6 @@ function buildProfessionalReportMessage(d) {
     : `${reportDateLabel(d.range.from, false)} – ${reportDateLabel(d.range.to, false)}`;
   const name = (document.getElementById('reportManagerName')?.value || CURRENT_USER?.name || 'Team').trim();
   const emailByCampaign = campaignActivityRows(d.emailEvents, 'Email');
-  const waByCampaign = campaignActivityRows(d.whatsappEvents, 'WhatsApp');
 
   const lines = [
     `Dear ${name},`,
@@ -235,23 +226,16 @@ function buildProfessionalReportMessage(d) {
     'CAMPAIGN ACTIVITY',
     `• Campaigns created: ${formatCount(d.campaignsCreated.length)}`,
     `  - Email campaigns: ${formatCount(d.campaignsCreated.filter(c => c.channel === 'Email').length)}`,
-    `  - WhatsApp campaigns: ${formatCount(d.campaignsCreated.filter(c => c.channel === 'WhatsApp').length)}`,
     '',
     'MESSAGE ACTIVITY',
     `• Email messages initiated from CRM: ${formatCount(d.emailEvents.length)}`,
-    `• WhatsApp messages initiated from CRM: ${formatCount(d.whatsappEvents.length)}`,
-    `• Total marketing messages initiated: ${formatCount(d.emailEvents.length + d.whatsappEvents.length)}`,
+    `• Total marketing messages initiated: ${formatCount(d.emailEvents.length)}`,
     ''
   ];
 
   if (emailByCampaign.length) {
     lines.push('EMAIL CAMPAIGN BREAKDOWN');
     emailByCampaign.forEach(c => lines.push(`• ${c.name}: ${formatCount(c.count)} message(s) initiated`));
-    lines.push('');
-  }
-  if (waByCampaign.length) {
-    lines.push('WHATSAPP CAMPAIGN BREAKDOWN');
-    waByCampaign.forEach(c => lines.push(`• ${c.name}: ${formatCount(c.count)} message(s) initiated`));
     lines.push('');
   }
 
@@ -264,7 +248,7 @@ function buildProfessionalReportMessage(d) {
     lines.push('');
   }
 
-  lines.push('Note: Email and WhatsApp activity is counted when the CRM opens the personalized message/compose action. The CRM cannot confirm that the final Send button was pressed in Gmail, Outlook or WhatsApp.');
+  lines.push('Note: Email activity is counted when the CRM opens the personalized message/compose action. The CRM cannot confirm that the final Send button was pressed in the external mail application.');
   lines.push('');
   lines.push('Regards,');
   lines.push(CURRENT_USER?.name || 'Abra Logistics Team');
@@ -304,7 +288,6 @@ function renderReportCharts(d) {
   const customerCounts = countByDate(d.customersAdded, x => x.createdAt, keys);
   const campaignCounts = countByDate(d.campaignsCreated, x => x.createdAt, keys);
   const emailCounts = countByDate(d.emailEvents, x => x.eventAt, keys);
-  const waCounts = countByDate(d.whatsappEvents, x => x.eventAt, keys);
 
   const make = (id, datasets) => {
     const el = document.getElementById(id); if (!el) return;
@@ -318,14 +301,13 @@ function renderReportCharts(d) {
   make('reportCampaignChart', [{ label: 'Campaigns Created', data: keys.map(k => campaignCounts[k]), tension: .3, fill: true }]);
   make('reportMessageChart', [
     { label: 'Email', data: keys.map(k => emailCounts[k]), tension: .3, fill: false },
-    { label: 'WhatsApp', data: keys.map(k => waCounts[k]), tension: .3, fill: false }
   ]);
 }
 
 function renderCampaignBreakdown(d) {
   const wrap = document.getElementById('reportCampaignBreakdown');
   if (!wrap) return;
-  const rows = [...campaignActivityRows(d.emailEvents, 'Email'), ...campaignActivityRows(d.whatsappEvents, 'WhatsApp')];
+  const rows = campaignActivityRows(d.emailEvents, 'Email');
   const max = Math.max(1, ...rows.map(r => r.count));
   wrap.innerHTML = rows.length ? rows.map(r => {
     const pct = Math.round((r.count / max) * 100);

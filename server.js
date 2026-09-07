@@ -722,8 +722,6 @@ async function getCRMSettings() {
 
     reminderAfterMinutes: 30,
 
-    whatsappMarketingMessagesPerBatch: 10,
-    whatsappMarketingCooldownMinutes: 5,
     emailMarketingMessagesPerBatch: 10,
     emailMarketingCooldownMinutes: 5,
 
@@ -1848,10 +1846,9 @@ function dailyReportMessage(report, dateKey) {
     '',
     'Marketing activity:',
     `Email messages initiated: ${report.marketing?.email?.messages || 0}`,
-    `WhatsApp messages initiated: ${report.marketing?.whatsapp?.messages || 0}`
   ];
 
-  for (const [channel, label] of [['email', 'Email'], ['whatsapp', 'WhatsApp']]) {
+  for (const [channel, label] of [['email', 'Email']]) {
     const campaigns = report.marketing?.[channel]?.campaigns || [];
     if (campaigns.length) {
       lines.push(`${label} campaigns:`);
@@ -1908,7 +1905,6 @@ async function buildDailyReport(dateKey, timezone) {
     topMembers: [],
     marketing: {
       email: { messages: 0, campaigns: [] },
-      whatsapp: { messages: 0, campaigns: [] }
     }
   };
 
@@ -1975,10 +1971,8 @@ async function buildDailyReport(dateKey, timezone) {
     }
   }
 
-  // Marketing activity is counted from the actual campaign recipient-open records
-  // for the same local date. This keeps the Telegram daily report aligned with
-  // the CRM's current Email + WhatsApp marketing report.
-  for (const [channel, collectionName] of [['email', 'emailMarketingCampaigns'], ['whatsapp', 'whatsappMarketingCampaigns']]) {
+  // Marketing activity is counted from actual Email campaign recipient-open records.
+  for (const [channel, collectionName] of [['email', 'emailMarketingCampaigns']]) {
     try {
       const campaignSnap = await db.collection(collectionName).get();
       const campaignRows = [];
@@ -1990,7 +1984,7 @@ async function buildDailyReport(dateKey, timezone) {
           if (opened && localDateKey(new Date(opened), timezone) === dateKey) messages += 1;
         }
         if (messages > 0) {
-          campaignRows.push({ name: campaign.name || `${channel === 'email' ? 'Email' : 'WhatsApp'} Campaign`, messages });
+          campaignRows.push({ name: campaign.name || `Email Campaign`, messages });
           report.marketing[channel].messages += messages;
         }
       }
@@ -2126,7 +2120,7 @@ function managementTelegramNotificationMessage(data, recipient) {
 
   if (type === 'marketing-campaign-created') {
     const marketingType =
-      metadata.marketingType === 'email' ? 'Email Marketing' : 'WhatsApp Marketing';
+      'Email Marketing';
     const lines = [
       '📣 <b>NEW MARKETING CAMPAIGN CREATED</b>',
       '',
@@ -2213,8 +2207,7 @@ function managementTelegramNotificationMessage(data, recipient) {
   }
 
   if (type === 'marketing-status-change') {
-    const marketingType =
-      metadata.marketingType === 'email' ? 'Email' : 'WhatsApp';
+    const marketingType = 'Email';
     const changedBy = firstNonEmpty(
       metadata.changedBy,
       data.createdByName,
@@ -3044,9 +3037,8 @@ function telegramReportMessage(report, dateKey, title = 'LEAD REPORT') {
   lines.push(
     '<b>📣 Marketing activity</b>',
     `Email messages initiated: ${marketing.email?.messages || 0}`,
-    `WhatsApp messages initiated: ${marketing.whatsapp?.messages || 0}`
   );
-  for (const [channel, label] of [['email', 'Email'], ['whatsapp', 'WhatsApp']]) {
+  for (const [channel, label] of [['email', 'Email']]) {
     const campaigns = marketing[channel]?.campaigns || [];
     if (campaigns.length) {
       lines.push(`<b>${label} campaigns</b>`);
@@ -5054,6 +5046,63 @@ process.on(
 
 
 // ============================================================
+// EMAIL MARKETING CUSTOMER CLEANUP
+// ============================================================
+// Customers are email-first: email is required, mobile is optional.
+// Remove legacy phone-only marketing contacts, remove WhatsApp campaign data,
+// and strip legacy WhatsApp subscription fields from retained contacts.
+async function cleanupEmailMarketingData() {
+  try {
+    const contactSnap = await db.collection('marketingContacts').get();
+    let batch = db.batch();
+    let operations = 0;
+    let deletedPhoneOnly = 0;
+    let cleanedLegacyFields = 0;
+
+    for (const doc of contactSnap.docs) {
+      const data = doc.data() || {};
+      const email = String(data.email || '').trim();
+      if (!email) {
+        batch.delete(doc.ref);
+        operations++;
+        deletedPhoneOnly++;
+      } else if ('whatsappStatus' in data) {
+        batch.update(doc.ref, {
+          whatsappStatus: admin.firestore.FieldValue.delete(),
+          marketingStatus: data.emailStatus || 'Subscribed'
+        });
+        operations++;
+        cleanedLegacyFields++;
+      }
+      if (operations >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        operations = 0;
+      }
+    }
+    if (operations) await batch.commit();
+
+    const whatsappSnap = await db.collection('whatsappMarketingCampaigns').get();
+    batch = db.batch();
+    operations = 0;
+    for (const doc of whatsappSnap.docs) {
+      batch.delete(doc.ref);
+      operations++;
+      if (operations >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        operations = 0;
+      }
+    }
+    if (operations) await batch.commit();
+
+    console.log(`Email marketing cleanup: removed ${deletedPhoneOnly} phone-only customers, cleaned ${cleanedLegacyFields} legacy customer records, removed ${whatsappSnap.size} WhatsApp campaigns.`);
+  } catch (error) {
+    console.error('Email marketing cleanup failed:', error.message);
+  }
+}
+
+// ============================================================
 // START SERVER
 // ============================================================
 
@@ -5081,6 +5130,7 @@ app.listen(
     );
 
     await configureTelegramWebhook();
+    await cleanupEmailMarketingData();
 
 
     if (DISABLE_BACKGROUND_TELEGRAM_SCANS) {

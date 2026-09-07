@@ -53,8 +53,6 @@ function _defaultConfig() {
     telegramAlerts:           true,
     telegramOverdueAlerts:    true,
     // § 8.5 Marketing Sending Limits
-    whatsappMarketingMessagesPerBatch: 10,
-    whatsappMarketingCooldownMinutes: 5,
     emailMarketingMessagesPerBatch: 10,
     emailMarketingCooldownMinutes: 5,
     marketingCooldownVoiceAnnouncements: true,
@@ -254,7 +252,7 @@ function _sectionGlobalFont(g, canEditFont) {
       <label class="form-label small fw-semibold">Font Family</label>
       <input id="cfg_fontFamily" class="form-control" value="${escapeHtml(family)}" ${disabled}
         placeholder="Inter">
-      <div class="form-text">Applied across the CRM, including sidebar, headings, tables, buttons, forms, Email Marketing and WhatsApp Marketing.</div>
+      <div class="form-text">Applied across the CRM, including sidebar, headings, tables, buttons, forms and Email Marketing.</div>
     </div>
     <div class="col-md-5">
       <div class="p-3 rounded border bg-light" id="crmFontPreview" style="font-family: '${escapeHtml(family).replace(/'/g, "&#39;")}';">
@@ -465,9 +463,6 @@ function _sectionMarketingLimits(g, canEdit) {
   return `
   <p class="small text-muted mb-3">Limits apply globally to each user across all campaigns in the channel. After the configured number of messages, sending pauses for the configured time.</p>
   <div class="row g-3">
-    <div class="col-12"><strong class="small">WhatsApp Marketing</strong></div>
-    <div class="col-6"><label class="form-label small fw-semibold">Messages per batch</label><input type="number" id="cfg_waMarketingMessages" class="form-control form-control-sm" min="1" max="1000" value="${g.whatsappMarketingMessagesPerBatch||10}" ${ro}></div>
-    <div class="col-6"><label class="form-label small fw-semibold">Cooldown after batch (minutes)</label><input type="number" id="cfg_waMarketingCooldown" class="form-control form-control-sm" min="0" max="1440" value="${g.whatsappMarketingCooldownMinutes??5}" ${ro}></div>
     <div class="col-12 mt-2"><strong class="small">Email Marketing</strong></div>
     <div class="col-6"><label class="form-label small fw-semibold">Messages per batch</label><input type="number" id="cfg_emailMarketingMessages" class="form-control form-control-sm" min="1" max="1000" value="${g.emailMarketingMessagesPerBatch||10}" ${ro}></div>
     <div class="col-6"><label class="form-label small fw-semibold">Cooldown after batch (minutes)</label><input type="number" id="cfg_emailMarketingCooldown" class="form-control form-control-sm" min="0" max="1440" value="${g.emailMarketingCooldownMinutes??5}" ${ro}></div>
@@ -686,8 +681,6 @@ async function saveMarketingLimits() {
   const role = CURRENT_USER?.role;
   if (role !== 'superadmin' && role !== 'admin') { toast('Only Super Admin or Admin can change marketing limits.', 'danger'); return; }
   const payload = {
-    whatsappMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById('cfg_waMarketingMessages')?.value) || 10),
-    whatsappMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById('cfg_waMarketingCooldown')?.value) || 0),
     emailMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById('cfg_emailMarketingMessages')?.value) || 10),
     emailMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById('cfg_emailMarketingCooldown')?.value) || 0),
     marketingCooldownVoiceAnnouncements: document.getElementById('cfg_marketingCooldownVoice')?.checked ?? true,
@@ -790,8 +783,6 @@ async function saveAllCRMSettings() {
       dateFormat:    document.getElementById("cfg_dateFormat")?.value || "DD MMM YYYY",
       timeFormat:    document.getElementById("cfg_timeFormat")?.value || "12h",
       currency:      document.getElementById("cfg_currency")?.value   || "INR",
-      whatsappMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById("cfg_waMarketingMessages")?.value) || 10),
-      whatsappMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById("cfg_waMarketingCooldown")?.value) || 0),
       emailMarketingMessagesPerBatch: Math.max(1, parseInt(document.getElementById("cfg_emailMarketingMessages")?.value) || 10),
       emailMarketingCooldownMinutes: Math.max(0, parseInt(document.getElementById("cfg_emailMarketingCooldown")?.value) || 0),
       marketingCooldownVoiceAnnouncements: document.getElementById("cfg_marketingCooldownVoice")?.checked ?? true,

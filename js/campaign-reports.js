@@ -13,10 +13,9 @@ function switchReportTab(tab) {
 }
 
 function campaignReportData() {
-  const marketing = window.MarketingChannels?.getReportData?.() || { customers: [], emailCampaigns: [], whatsappCampaigns: [] };
+  const marketing = window.MarketingChannels?.getReportData?.() || { customers: [], emailCampaigns: [] };
   const campaigns = [
     ...(marketing.emailCampaigns || []).map(c => ({...c, channel:'Email'})),
-    ...(marketing.whatsappCampaigns || []).map(c => ({...c, channel:'WhatsApp'}))
   ];
   return { marketing, campaigns, leads: Array.isArray(window.ALL_LEADS) ? window.ALL_LEADS : [] };
 }
@@ -78,7 +77,7 @@ function renderCampaignReportsPanel() {
   }
   wrap.innerHTML=`
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-      <div><h2 class="page-title"><i class="bi bi-bar-chart-line me-2"></i>Campaign Reports</h2><p class="page-subtitle">Campaign performance from the data already loaded by Email, WhatsApp and Leads.</p></div>
+      <div><h2 class="page-title"><i class="bi bi-bar-chart-line me-2"></i>Campaign Reports</h2><p class="page-subtitle">Campaign performance from the data already loaded by Email and Leads.</p></div>
     </div>
     <div class="table-card p-3 mb-3"><div class="row g-2">
       <div class="col-md-3"><label class="form-label small">Campaign</label><select id="reportFilterCampaign" class="form-select form-select-sm" onchange="applyReportFilters()"></select></div>
@@ -126,7 +125,7 @@ function renderMemberPerformanceReport(){
 function renderTrendsReport(){
   const area=document.getElementById('reportContentArea');if(!area)return;const d=campaignReportData(),range=campaignReportRange(),keys=[];const x=new Date(`${range.from}T12:00:00`),end=new Date(`${range.to}T12:00:00`);while(x<=end){keys.push(x.toISOString().slice(0,10));x.setDate(x.getDate()+1)}
   const email=Object.fromEntries(keys.map(k=>[k,0])),wa=Object.fromEntries(keys.map(k=>[k,0]));d.campaigns.forEach(c=>campaignEvents(c).forEach(e=>{const k=reportDateKey(e.openedAt);if(k&&email[k]!==undefined)(c.channel==='Email'?email:wa)[k]++}));
-  area.innerHTML=`<div class="table-card p-3"><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Date</th><th>Email</th><th>WhatsApp</th><th>Total</th></tr></thead><tbody>${keys.map(k=>`<tr><td>${reportDateLabel(k,false)}</td><td>${email[k]}</td><td>${wa[k]}</td><td><strong>${email[k]+wa[k]}</strong></td></tr>`).join('')}</tbody></table></div></div>`;
+  area.innerHTML=`<div class="table-card p-3"><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Date</th><th>Email</th><th>Total</th></tr></thead><tbody>${keys.map(k=>`<tr><td>${reportDateLabel(k,false)}</td><td>${email[k]}</td><td><strong>${email[k]}</strong></td></tr>`).join('')}</tbody></table></div></div>`;
 }
 
 function applyReportFilters(){renderCurrentReport()}
