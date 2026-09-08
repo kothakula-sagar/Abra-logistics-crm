@@ -1309,6 +1309,28 @@
     </div>
   </div>
 
+  <!-- CUSTOMER IMPORT PROGRESS -->
+  <div class="modal fade" id="customerImportModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content customer-import-modal">
+        <div class="modal-body p-4">
+          <div class="customer-import-orb"><i class="bi bi-shield-check"></i></div>
+          <h5 class="text-center mb-1" id="customerImportTitle">Checking file</h5>
+          <p class="text-center text-muted small mb-4" id="customerImportSubtitle">Preparing your customer import securely...</p>
+          <div class="customer-import-progress"><div id="customerImportProgressBar"></div></div>
+          <div class="customer-import-steps">
+            <div data-import-step="file"><span><i class="bi bi-file-earmark-excel"></i></span>Checking file</div>
+            <div data-import-step="data"><span><i class="bi bi-person-check"></i></span>Checking customer data</div>
+            <div data-import-step="duplicates"><span><i class="bi bi-copy"></i></span>Checking duplicates</div>
+            <div data-import-step="security"><span><i class="bi bi-shield-lock"></i></span>Checking security rules</div>
+            <div data-import-step="database"><span><i class="bi bi-database-check"></i></span>Preparing database</div>
+            <div data-import-step="complete"><span><i class="bi bi-check2-circle"></i></span>Import ready</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- MARKETING CONTACT MODAL -->
   <div class="modal fade" id="marketingContactModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -1402,6 +1424,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/client-protection.js"></script>
   <script src="js/firebase-config.js"></script>
   <script src="js/auth.js"></script>

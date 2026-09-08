@@ -1179,3 +1179,15 @@
     white-space: nowrap;
   }
 }
+/* Customer import progress */
+.customer-import-modal{border:0;border-radius:18px;overflow:hidden}
+.customer-import-orb{width:64px;height:64px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(23,105,224,.10);color:#1769e0;font-size:28px;animation:customerImportPulse 1.5s ease-in-out infinite}
+.customer-import-progress{height:6px;border-radius:999px;background:#e9eef5;overflow:hidden;margin-bottom:22px}
+.customer-import-progress>div{height:100%;width:0;border-radius:999px;background:#1769e0;transition:width .45s ease}
+.customer-import-steps{display:grid;gap:9px}
+.customer-import-steps>div{display:flex;align-items:center;gap:10px;color:#94a3b8;font-size:13px;transition:all .25s ease}
+.customer-import-steps>div span{width:27px;height:27px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f1f5f9;font-size:13px}
+.customer-import-steps>div.active{color:#1769e0;font-weight:600}
+.customer-import-steps>div.active span{background:rgba(23,105,224,.12);animation:customerImportStep .9s ease-in-out infinite}
+@keyframes customerImportPulse{50%{transform:scale(1.06);opacity:.72}}
+@keyframes customerImportStep{50%{transform:scale(1.08)}}
