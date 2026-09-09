@@ -84,8 +84,8 @@
       if(invalid.length)throw new Error(`${invalid[0]}${invalid.length>1?` (+${invalid.length-1} more errors)`:''}`);
       showImportProgress('Checking duplicates','Comparing email addresses locally before any database write...',45,'duplicates');
       await sleep(900);
-      if(!contactCacheLoaded)await loadContacts();
-      const existingEmails=new Set(state.contacts.map(c=>normalizeEmail(c.email)).filter(Boolean));
+      const contacts=await window.MarketingChannels?.ensureContactsLoaded?.()||getCustomers();
+      const existingEmails=new Set(contacts.map(c=>normalizeEmail(c.email)).filter(Boolean));
       const seen=new Set();
       const unique=valid.filter(row=>{
         if(existingEmails.has(row.email)||seen.has(row.email))return false;
@@ -104,15 +104,16 @@
       for(let start=0;start<unique.length;start+=450){
         const chunk=unique.slice(start,start+450), batch=db.batch();
         chunk.forEach((row,index)=>{
-          const ref=contactsRef().doc();
+          const ref=window.marketingContactsRef?.doc();
+          if(!ref)throw new Error('Customer database is not ready. Please refresh the CRM and try again.');
           const data={source:'import',name:row.name,email:row.email,phone:row.phone,company:row.company,emailStatus:'Subscribed',marketingStatus:'Subscribed',createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:CURRENT_USER.uid,createdByName:CURRENT_USER.name||CURRENT_USER.email,importCode:IMPORT_CODE};
           batch.set(ref,data); imported.push({...row,id:ref.id,source:'import',createdAt:new Date(now+start+index),updatedAt:new Date(now+start+index),emailStatus:'Subscribed',marketingStatus:'Subscribed',createdBy:CURRENT_USER.uid,createdByName:CURRENT_USER.name||CURRENT_USER.email,importCode:IMPORT_CODE});
         });
         await batch.commit();
       }
-      state.contacts=state.contacts.concat(imported);
+      await window.MarketingChannels?.refreshContacts?.();
       showImportProgress('Import complete',`${unique.length} imported successfully. ${skipped} duplicate${skipped===1?'':'s'} skipped.`,100,'complete');
-      render(); notifyContactListeners?.();
+      render();
       await sleep(1000); hideImportProgress();
       toast?.(`Import successful: ${unique.length} added, ${skipped} duplicate${skipped===1?'':'s'} skipped.`,'success');
     }catch(e){
