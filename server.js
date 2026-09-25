@@ -151,7 +151,8 @@ async function sendGmailEmail({ to, subject, text, html }) {
     subject,
     text,
     html,
-    messageId
+    messageId,
+    fromEmail: senderEmail
   }));
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
