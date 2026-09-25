@@ -34,7 +34,7 @@ const FRONTEND_ORIGIN =
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
 const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
 const GMAIL_REFRESH_TOKEN = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
-const GMAIL_USER_EMAIL = String(process.env.GMAIL_USER_EMAIL || 'abralogisticsupport@gmail.com').trim();
+const GMAIL_USER_EMAIL = String(process.env.GMAIL_USER_EMAIL || '').trim();
 const GMAIL_REDIRECT_URI = String(process.env.GMAIL_REDIRECT_URI || `${PUBLIC_BASE_URL}/api/email/gmail/oauth/callback`).trim();
 const gmailOAuthStates = new Map();
 const gmailAccessTokenCache = { token: '', expiresAt: 0 };
@@ -59,7 +59,8 @@ function encodeMimeBase64(value) {
 
 function buildGmailMimeMessage({ to, subject, text, html, messageId, fromEmail }) {
   const boundary = `=_AbraGmail_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const safeFrom = String(fromEmail || GMAIL_USER_EMAIL).trim();
+  const safeFrom = String(fromEmail || '').trim();
+  if (!safeFrom) throw new Error('Gmail account email could not be determined.');
   return [
     `From: ${smtpHeader('Abra E Logistic PVT. LTD.')} <${safeFrom}>`,
     `To: ${to}`,
@@ -88,12 +89,12 @@ function buildGmailMimeMessage({ to, subject, text, html, messageId, fromEmail }
 }
 
 function gmailConfigured() {
-  return !!(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_USER_EMAIL);
+  return !!(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET);
 }
 
 async function getGmailAccessToken() {
   if (!gmailConfigured()) {
-    throw new Error('Gmail delivery is not configured. Add GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_USER_EMAIL.');
+    throw new Error('Gmail delivery is not configured. Add GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET.');
   }
   if (!GMAIL_REFRESH_TOKEN) {
     const err = new Error('Gmail is not authorized yet. Open the Gmail authorization link in CRM settings and complete Google authorization.');
@@ -127,18 +128,21 @@ async function getGmailAccessToken() {
 
 async function sendGmailEmail({ to, subject, text, html }) {
   const accessToken = await getGmailAccessToken();
-  let senderEmail = GMAIL_USER_EMAIL;
-  try {
-    const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const profile = await profileResponse.json().catch(() => ({}));
-    if (profileResponse.ok && profile.emailAddress) senderEmail = String(profile.emailAddress).trim();
-  } catch (profileError) {
-    console.warn('Gmail profile lookup failed, using GMAIL_USER_EMAIL:', profileError.message);
+  const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const profile = await profileResponse.json().catch(() => ({}));
+  if (!profileResponse.ok || !profile.emailAddress) {
+    const reason = profile?.error?.message || profileResponse.statusText || 'Unable to determine the Gmail account authorized by the refresh token.';
+    const err = new Error(`Gmail profile: ${reason}`);
+    err.code = 'GMAIL_PROFILE_FAILED';
+    throw err;
   }
-  if (senderEmail.toLowerCase() !== GMAIL_USER_EMAIL.toLowerCase()) {
-    console.warn(`Authenticated Gmail profile ${senderEmail} differs from GMAIL_USER_EMAIL ${GMAIL_USER_EMAIL}. Using authenticated profile.`);
+  const senderEmail = String(profile.emailAddress).trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
+    const err = new Error('Gmail returned an invalid sender email address.');
+    err.code = 'GMAIL_PROFILE_FAILED';
+    throw err;
   }
 
   const messageId = `${Date.now()}.${Math.random().toString(16).slice(2)}@abra-logistic.com`;
@@ -147,8 +151,7 @@ async function sendGmailEmail({ to, subject, text, html }) {
     subject,
     text,
     html,
-    messageId,
-    fromEmail: senderEmail
+    messageId
   }));
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
@@ -168,7 +171,6 @@ async function sendGmailEmail({ to, subject, text, html }) {
     const err = new Error(`Gmail API: ${reason}${details && !reason.includes(details) ? ` (${details})` : ''}`);
     err.code = 'GMAIL_SEND_FAILED';
     err.gmailStatus = response.status;
-    err.gmailResponse = data;
     throw err;
   }
   return { messageId: data.id || messageId, senderEmail };
