@@ -57,9 +57,9 @@ function encodeMimeBase64(value) {
     .match(/.{1,76}/g)?.join('\r\n') || '';
 }
 
-function buildGmailMimeMessage({ to, subject, text, html, messageId }) {
+function buildGmailMimeMessage({ to, subject, text, html, messageId, fromEmail }) {
   const boundary = `=_AbraGmail_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const safeFrom = GMAIL_USER_EMAIL;
+  const safeFrom = String(fromEmail || GMAIL_USER_EMAIL).trim();
   return [
     `From: ${smtpHeader('Abra E Logistic PVT. LTD.')} <${safeFrom}>`,
     `To: ${to}`,
@@ -147,7 +147,8 @@ async function sendGmailEmail({ to, subject, text, html }) {
     subject,
     text,
     html,
-    messageId
+    messageId,
+    fromEmail: senderEmail
   }));
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
@@ -159,9 +160,15 @@ async function sendGmailEmail({ to, subject, text, html }) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.id) {
-    const reason = data?.error?.message || data?.error?.status || 'Gmail API rejected the message.';
-    const err = new Error(`Gmail API: ${reason}`);
+    const apiError = data?.error || {};
+    const reason = apiError.message || apiError.status || response.statusText || 'Gmail API rejected the message.';
+    const details = Array.isArray(apiError.errors)
+      ? apiError.errors.map(item => item?.message || item?.reason).filter(Boolean).join('; ')
+      : '';
+    const err = new Error(`Gmail API: ${reason}${details && !reason.includes(details) ? ` (${details})` : ''}`);
     err.code = 'GMAIL_SEND_FAILED';
+    err.gmailStatus = response.status;
+    err.gmailResponse = data;
     throw err;
   }
   return { messageId: data.id || messageId, senderEmail };
